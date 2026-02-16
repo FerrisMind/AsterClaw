@@ -1,0 +1,37 @@
+# Build
+target/
+**/*.rlib
+**/*.rmeta
+
+# Rust tools
+/.cargo/
+
+# IDEs and editors
+.idea/
+.vscode/
+*.sublime-workspace
+*.sublime-project
+
+# Environment / logs
+.env
+*.log
+gateway_smoke.log
+
+# Session / configs
+.picob/
+.picoclaw/
+config.json
+sessions/
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# References artifacts
+references/picoclaw/target/
+references/

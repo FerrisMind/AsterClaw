@@ -1,195 +1,122 @@
-<!--
-  README TEMPLATE — TAURI + SVELTE
-  
-  Замените плейсхолдеры {{...}} и удалите этот комментарий.
-  
-  {{PROJECT_NAME}}     — Название проекта
-  {{PROJECT_SLUG}}     — GitHub slug (owner/repo)
-  {{LOGO_URL}}         — URL логотипа
-  {{SCREENSHOT_URL}}   — URL главного скриншота
-  {{YEAR}}             — Год копирайта
-  {{AUTHOR}}           — Имя автора
-  {{LICENSE_TYPE}}     — Тип лицензии
-
-  ─────────────────────────────────────────────────────────────────────────────
-  ОБЯЗАТЕЛЬНЫЕ ПЕРЕВОДЫ (3 языка):
-  ─────────────────────────────────────────────────────────────────────────────
-  
-  1. README.md      — English (основной)
-  2. README.RU.md   — Русский
-  3. README.PT_BR.md — Português (Brasil)
-  
-  Цвета бейджей:
-  - Активный язык (текущий файл):
-    • English:    #5B7CFA (синий)
-    • Русский:    #D65C5C (красный)
-    • Português:  #3ABF7A (зелёный)
-  - Неактивный язык: #232323 (тёмно-серый)
--->
-
-</p>
 <p align="left">
-  <!-- Для README.md (English — активный) -->
   <a href="README.md"><img src="https://img.shields.io/badge/English-5B7CFA" alt="English"></a>
   <a href="README.RU.md"><img src="https://img.shields.io/badge/Русский-232323" alt="Русский"></a>
   <a href="README.PT_BR.md"><img src="https://img.shields.io/badge/Português_BR-232323" alt="Português"></a>
-  
-  <!-- Для README.RU.md (Русский — активный)
-  <a href="README.md"><img src="https://img.shields.io/badge/English-232323" alt="English"></a>
-  <a href="README.RU.md"><img src="https://img.shields.io/badge/Русский-D65C5C" alt="Русский"></a>
-  <a href="README.PT_BR.md"><img src="https://img.shields.io/badge/Português_BR-232323" alt="Português"></a>
-  -->
-  
-  <!-- Для README.PT_BR.md (Português — активный)
-  <a href="README.md"><img src="https://img.shields.io/badge/English-232323" alt="English"></a>
-  <a href="README.RU.md"><img src="https://img.shields.io/badge/Русский-232323" alt="Русский"></a>
-  <a href="README.PT_BR.md"><img src="https://img.shields.io/badge/Português_BR-3ABF7A" alt="Português"></a>
-  -->
 </p>
 
----
+<h1 align="center">picors</h1>
 
 <p align="center">
-  <img src="{{LOGO_URL}}" alt="{{PROJECT_NAME}} Logo" width="512" height="512">
-
-<p align="center">
-  <b>{{PROJECT_DESCRIPTION}}</b><br>
-  {{PROJECT_TAGLINE}}
-</p>
-
-<p align="center">
-  <a href="https://github.com/{{PROJECT_SLUG}}/releases"><img src="https://img.shields.io/github/v/release/{{PROJECT_SLUG}}?logo=github" alt="Latest Release"></a>
-  <!-- Раскомментируйте, если проект включён в соответствующий awesome-list:
-  <a href="https://github.com/tauri-apps/awesome-tauri"><img src="https://img.shields.io/badge/Awesome-Tauri-24C8D8?logo=tauri" alt="Awesome Tauri"></a>
-  <a href="https://github.com/TheComputerM/awesome-svelte"><img src="https://img.shields.io/badge/Awesome-Svelte-FF3E00?logo=svelte" alt="Awesome Svelte"></a>
-  <a href="https://github.com/{{PROJECT_SLUG}}/stargazers"><img src="https://img.shields.io/github/stars/{{PROJECT_SLUG}}?logo=github" alt="GitHub Stars"></a>
-  -->
-</p>
-
-<h1 align="center"></h1>
-
-<p align="center">
-  <img src="{{SCREENSHOT_URL}}" alt="{{PROJECT_NAME}} Interface" width="900">
+  Rust 2024 MVP port of PicoClaw that ships a working `gateway` with Telegram, OpenAI-compatible providers, cron jobs, and a real `migrate` workflow.
 </p>
 
 ## 📚 Table of Contents
 
-- [What is this?](#-what-is-this)
-- [Demo](#-demo)
-- [Key Features](#-key-features)
-- [Installation & Setup](#️-installation--setup)
-- [How to Start Using](#-how-to-start-using)
-- [System Requirements](#️-system-requirements)
-- [Acknowledgments](#-acknowledgments)
+- [What is picors?](#-what-is-picors)
+- [MVP Scope](#-mvp-scope)
+- [Quick Commands](#-quick-commands)
+- [Configuration](#-configuration)
+- [Provider Strategy](#-provider-strategy)
+- [Tooling & Messaging](#-tooling--messaging)
+- [Health, Cron, Heartbeat](#-health-cron-heartbeat)
+- [Migration Command](#-migration-command)
+- [Running & Testing](#-running--testing)
+- [Contributing](#-contributing)
 - [License](#-license)
 
-## ✨ What is this?
+## ✨ What is picors?
 
-{{PROJECT_NAME}} is a native desktop application for [purpose]. Built with Rust and Tauri v2, it provides a fast, [key benefit] without requiring [limitation it removes].
+`picors` is a command-line gateway built in Rust 2024 that mirrors PicoClaw’s agent stack. It focuses on:
 
-## 🎬 Demo
+- agent loops + message bus with outbound channel dispatch
+- a polling Telegram channel with allowlist/username filters
+- OpenAI-compatible provider pipeline (OpenAI/OpenRouter/Groq/Zhipu/DeepSeek)
+- dual configuration (`.picors` preferred, `.picoclaw` fallback) plus real migration tooling
+- cron job persistence and health endpoints (`/health`, `/ready`)
 
-<!-- Вставьте демо-видео через GitHub assets -->
-https://github.com/user-attachments/assets/your-video-id
+The goal is a **minimal but practical MVP**: working `gateway`, Telegram channel, provider tools, and CLI support (`migrate`, `cron`, `status`, `agent`, etc.).
 
-## 🚀 Key Features
+## 🚀 MVP Scope
 
-- Feature 1 — description
-- Feature 2 — description
-- Feature 3 — description
-- Feature 4 — description
-- Feature 5 — description
+| Area | Description |
+| --- | --- |
+| Gateway + agent loop | Consume inbound messages, run tools/providers, publish outbound events, notify channels |
+| Telegram channel | Polling mode, allowlist/username filters, `/help`/`/list`/`/show`, markdown-safe outbound |
+| Provider pipeline | OpenAI-compatible layer with config-driven provider selection (explicit provider → model prefix → OpenRouter) |
+| Core tools | Filesystem tools, guarded `exec`, `web_search`, `web_fetch`, channel `message` context |
+| Config + state | Dual read paths (`.picors` → `.picoclaw`), sanitized Windows-safe session names, atomic saves |
+| Health & cron | `/health` + `/ready` endpoints, cron CRUD persisted under `workspace/cron/jobs.json` |
+| Migration | `picors migrate` mirrors legacy `.picoclaw` layout (config + workspace) with dry-run, scope flags, backups |
 
-### Hardware Acceleration
+## ⚡ Quick Commands
 
-| Backend | Status | Notes |
-|---------|:------:|-------|
-| CPU | ✅ | Default, works everywhere |
-| CUDA (NVIDIA) | ✅ | Requires CUDA toolkit |
-| Metal (Apple) | ✅ | macOS only |
-| Intel MKL | ⚠️ | Optional |
+- `cargo check`
+- `cargo clippy -- -D warnings`
+- `cargo test`
+- `picors gateway`
+- `picors cron list`
+- `picors migrate --dry-run`
+- `picors status`
 
-## 🛠️ Installation & Setup
+Additional commands (`agent`, `onboard`, `skills`, `auth`, `heartbeat`, `devices`) are documented in `PLAN.md`.
 
-### Prerequisites
+## 🛠️ Configuration
 
-- Node.js (for frontend build)
-- Rust toolchain (for backend)
-- For CUDA: NVIDIA GPU with CUDA toolkit
-- For Metal: macOS with Apple Silicon
+- **Primary config:** `~/.picors/config.json` (written by onboarding, CLI commands, and cron service).
+- **Legacy fallback:** If `.picors` is absent, runtime reads `~/.picoclaw/config.json`, translating camelCase/snake_case keys before merging.
+- **Workspace:** Sessions, cron jobs, and skills live inside the configured `workspace.path` (or `workspace` directory under the current workspace) with atomic persistence.
+- **State:** Sessions are stored using Windows-safe filenames (sanitize `:` → `_`), with atomic writes to avoid corruption.
 
-### Development
+## 🎛️ Provider Strategy
 
-```bash
-# Install dependencies
-npm install
+1. **OpenAI** — default when `providers.openai` or model prefixes imply OpenAI APIs.
+2. **OpenRouter** — fallback when `api_base` contains `openrouter.ai` and no explicit provider is set.
+3. **Groq / Zhipu / DeepSeek** — supported via the shared OpenAI-compatible layer (provider selection from config/model prefix).
+4. **Environment fallback** — `OPENAI_API_KEY`/`OPENAI_API_BASE` and their provider-specific equivalents are consulted when config lacks keys, but config values always override env.
 
-# Run with CPU backend
-npm run tauri:dev:cpu
+Providers share a unified request/response parser, making features like tool calls and streaming consistent across the stack.
 
-# Run with CUDA backend (NVIDIA GPU)
-npm run tauri:dev:cuda
+## 🧱 Tooling & Messaging
 
-# Platform-aware development
-npm run app:dev
-```
+- **Filesystem tools** guard against directory traversal and avoid aggressive `canonicalize()` on child writes.
+- **`exec` tool** enforces workspace policies and filters dangerous patterns before spawning commands.
+- **`web_search`** integrates Brave/DDG endpoints via the tool interface when enabled (`web_search.enabled`).
+- **`web_fetch`** downloads online resources and returns structured metadata for prompts.
+- **`message` tool** lets models speak directly through Telegram or other channels without re-publishing outbound events.
 
-### Build
+## 🧪 Health, Cron, Heartbeat
 
-```bash
-# Build with CPU backend
-npm run tauri:build:cpu
+- Health server exposes `/health` (liveness) and `/ready` (gateway readiness) endpoints within the `gateway` process.
+- Cron jobs persist in `workspace/cron/jobs.json`; CLI commands allow `add/list/remove/enable/disable`, and the cron runner schedules JSON-backed jobs.
+- Heartbeat is minimal in MVP — only triggers periodically when configured and paired with cron services.
 
-# Build with CUDA backend
-npm run tauri:build:cuda
-```
+## 🔁 Migration Command
 
-### Quality Checks
+`picors migrate` is treated as a first-class MVP feature:
 
-```bash
-npm run lint          # ESLint
-npm run lint:fix      # ESLint with auto-fix
-npm run check         # Svelte type checking
-npm run format        # Prettier formatting
-npm run test          # Vitest tests
-```
+1. `--dry-run` reports planned copies/conversions without modifying anything.
+2. `--config-only` or `--workspace-only` limit the migration scope.
+3. `--force` backs up existing `.picors` files (under `~/.picors/backups`) before overwriting.
+4. Legacy provider keys, sessions, skills, and memory files are migrated to the new layout with summaries (copied/skipped/errors).
 
-### Rust-specific (from src-tauri/)
+Migration also sanitizes session filenames so Windows paths stay valid.
 
-```bash
-cargo clippy          # Linting
-cargo test            # Unit tests
-cargo audit           # Security audit
-```
+## 🧰 Running & Testing
 
-## 📖 How to Start Using
+1. Install Rust 2024 toolchain (`rust-toolchain.toml`) via `rustup`.
+2. Run `cargo check`, `cargo clippy -- -D warnings`, and `cargo test` before committing.
+3. Start the gateway locally with `picors gateway`; logs include agent loops, provider requests, and Telegram polling.
+4. Use `picors cron list` and `picors migrate --dry-run` during development to validate cron persistence and migration logic.
 
-1. Build or download the application
-2. Download required models/data (if applicable)
-3. Launch {{PROJECT_NAME}}
-4. Configure through the interface
-5. Start using!
+## 🤝 Contributing
 
-## 🖥️ System Requirements
+- Follow the phased roadmap in `PLAN.md` to understand upcoming work.
+- Keep CLI help text synchronized with implemented commands (no placeholder `TODO`s).
+- Document new user-visible features in all three README files.
+- Preserve the dual `.picors`/`.picoclaw` compatibility guarantees when touching config/state code.
 
-- Windows, macOS, or Linux
-- Minimum 4 GB RAM (8+ GB recommended)
-- For GPU acceleration:
-  - NVIDIA: CUDA-compatible GPU
-  - Apple: M1/M2/M3/M4 chip (Metal)
-
-## 🙏 Acknowledgments
-
-This project is built on top of excellent open-source work:
-
-- [Tauri](https://tauri.app/) — Desktop application framework
-- [Svelte](https://svelte.dev/) — Frontend framework
-- [Dependency](URL) — Description
-
-See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for full dependency attribution.
+For blockers or ongoing work, see `error.md`.
 
 ## 📄 License
 
-{{LICENSE_TYPE}} — see [LICENSE](LICENSE)
-
-Copyright (c) {{YEAR}} {{AUTHOR}}
+MIT — see [LICENSE](LICENSE) for details.

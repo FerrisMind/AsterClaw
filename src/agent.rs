@@ -1,0 +1,577 @@
+//! Core AI agent loop.
+
+use parking_lot::{Mutex, RwLock};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use crate::bus::{InboundMessage, MessageBus, OutboundMessage};
+use crate::channels::ChannelManager;
+use crate::config::Config;
+use crate::constants;
+use crate::providers::{Message, ProcessOptions, Provider};
+use crate::session::SessionManager;
+use crate::state::Manager as StateManager;
+use crate::tools::{ToolRegistry, ToolResult};
+
+pub struct AgentLoop {
+    bus: Arc<MessageBus>,
+    provider: Arc<dyn Provider>,
+    workspace: PathBuf,
+    model: String,
+    context_window: i32,
+    max_iterations: i32,
+    sessions: Arc<Mutex<SessionManager>>,
+    state: Arc<Mutex<StateManager>>,
+    tools: Arc<Mutex<ToolRegistry>>,
+    running: AtomicBool,
+    channel_manager: Arc<RwLock<Option<Arc<ChannelManager>>>>,
+}
+
+impl AgentLoop {
+    pub fn new(config: &Config, msg_bus: &Arc<MessageBus>, provider: Arc<dyn Provider>) -> Self {
+        let workspace = config.workspace_path();
+        let sessions = Arc::new(Mutex::new(SessionManager::new(workspace.join("sessions"))));
+        let state = Arc::new(Mutex::new(StateManager::new(workspace.clone())));
+        let tools = Arc::new(Mutex::new(ToolRegistry::new(
+            workspace.clone(),
+            config.agents.defaults.restrict_to_workspace,
+        )));
+
+        Self {
+            bus: msg_bus.clone(),
+            provider,
+            workspace,
+            model: config.agents.defaults.model.clone(),
+            context_window: config.agents.defaults.max_tokens,
+            max_iterations: config.agents.defaults.max_tool_iterations,
+            sessions,
+            state,
+            tools,
+            running: AtomicBool::new(false),
+            channel_manager: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    pub fn set_channel_manager(&self, manager: Arc<ChannelManager>) {
+        *self.channel_manager.write() = Some(manager);
+    }
+
+    pub async fn process_direct(&self, content: &str, session_key: &str) -> anyhow::Result<String> {
+        let msg = InboundMessage {
+            channel: "cli".to_string(),
+            sender_id: "cli".to_string(),
+            chat_id: "direct".to_string(),
+            content: content.to_string(),
+            session_key: session_key.to_string(),
+            media: None,
+            metadata: None,
+        };
+        self.process_message(msg).await
+    }
+
+    pub async fn process_message(&self, msg: InboundMessage) -> anyhow::Result<String> {
+        tracing::info!("Processing message from {}:{}", msg.channel, msg.sender_id);
+
+        if msg.channel == "system" {
+            return self.process_system_message(msg).await;
+        }
+
+        if msg.content.starts_with('/') {
+            return self.handle_command(&msg).await;
+        }
+
+        let opts = ProcessOptions {
+            session_key: msg.session_key.clone(),
+            channel: msg.channel.clone(),
+            chat_id: msg.chat_id.clone(),
+            user_message: msg.content.clone(),
+            default_response: "I've completed processing but have no response to give.".to_string(),
+            enable_summary: true,
+            no_history: false,
+        };
+
+        let response = self.run_agent_loop(opts).await?;
+
+        if !response.is_empty() {
+            let _ = self
+                .bus
+                .publish_outbound(OutboundMessage {
+                    channel: msg.channel,
+                    chat_id: msg.chat_id,
+                    content: response.clone(),
+                })
+                .await;
+        }
+
+        Ok(response)
+    }
+
+    async fn process_system_message(&self, msg: InboundMessage) -> anyhow::Result<String> {
+        let origin_channel = if let Some(idx) = msg.chat_id.find(':') {
+            msg.chat_id[..idx].to_string()
+        } else {
+            "cli".to_string()
+        };
+
+        if constants::is_internal_channel(&origin_channel) {
+            tracing::info!("Subagent completed (internal channel): {}", origin_channel);
+            return Ok(String::new());
+        }
+
+        tracing::info!("Subagent completed: channel={}", origin_channel);
+        Ok(String::new())
+    }
+
+    async fn run_agent_loop(&self, opts: ProcessOptions) -> anyhow::Result<String> {
+        if !opts.channel.is_empty()
+            && !opts.chat_id.is_empty()
+            && !constants::is_internal_channel(&opts.channel)
+        {
+            let channel_key = format!("{}:{}", opts.channel, opts.chat_id);
+            self.state.lock().set_last_channel(&channel_key);
+        }
+
+        self.update_tool_contexts(&opts.channel, &opts.chat_id);
+
+        let history = if !opts.no_history {
+            self.sessions.lock().get_history(&opts.session_key)
+        } else {
+            vec![]
+        };
+
+        let summary = if !opts.no_history {
+            self.sessions.lock().get_summary(&opts.session_key)
+        } else {
+            String::new()
+        };
+
+        let mut messages = self.build_messages(
+            history,
+            summary,
+            &opts.user_message,
+            None,
+            &opts.channel,
+            &opts.chat_id,
+        );
+
+        if !opts.no_history {
+            self.sessions
+                .lock()
+                .add_message(&opts.session_key, "user", &opts.user_message);
+        }
+
+        let (final_content, iteration, sent_message_tool) =
+            self.run_llm_iteration(&mut messages, &opts).await?;
+
+        let final_content = if final_content.is_empty() && !sent_message_tool {
+            opts.default_response.clone()
+        } else {
+            final_content
+        };
+
+        if !opts.no_history {
+            self.sessions
+                .lock()
+                .add_message(&opts.session_key, "assistant", &final_content);
+            let _ = self.sessions.lock().save(&opts.session_key);
+        }
+
+        if opts.enable_summary {
+            self.maybe_summarize(&opts.session_key, &opts.channel, &opts.chat_id);
+        }
+
+        tracing::info!(
+            "Response: {} (iterations: {})",
+            final_content.chars().take(120).collect::<String>(),
+            iteration
+        );
+
+        Ok(final_content)
+    }
+
+    fn build_messages(
+        &self,
+        history: Vec<Message>,
+        summary: String,
+        current_message: &str,
+        _media: Option<&[String]>,
+        channel: &str,
+        chat_id: &str,
+    ) -> Vec<Message> {
+        let mut messages = Vec::new();
+        let system_prompt = self.build_system_prompt(channel, chat_id);
+
+        let mut system_with_summary = system_prompt;
+        if !summary.is_empty() {
+            system_with_summary += "\n\n## Summary of Previous Conversation\n\n";
+            system_with_summary += &summary;
+        }
+
+        messages.push(Message::system(&system_with_summary));
+        messages.extend(history);
+        messages.push(Message::user(current_message));
+        messages
+    }
+
+    fn build_system_prompt(&self, channel: &str, chat_id: &str) -> String {
+        let mut prompt = String::new();
+        prompt.push_str("# PicoClaw 🦞\n\n");
+        prompt.push_str("You are picoclaw, a helpful AI assistant.\n\n");
+
+        let now = chrono::Local::now().format("%Y-%m-%d %H:%M (%A)");
+        prompt.push_str(&format!("## Current Time\n{}\n\n", now));
+
+        prompt.push_str(&format!(
+            "## Workspace\nYour workspace is at: {}\n",
+            self.workspace.display()
+        ));
+        prompt.push_str(&format!(
+            "- Memory: {}/memory/MEMORY.md\n",
+            self.workspace.display()
+        ));
+        prompt.push_str(&format!(
+            "- Daily Notes: {}/memory/YYYYMM/YYYYMMDD.md\n",
+            self.workspace.display()
+        ));
+        prompt.push_str(&format!(
+            "- Skills: {}/skills/{{skill-name}}/SKILL.md\n\n",
+            self.workspace.display()
+        ));
+
+        let tool_summaries = self.tools.lock().get_summaries();
+        if !tool_summaries.is_empty() {
+            prompt.push_str("## Available Tools\n\n");
+            prompt.push_str("**CRITICAL**: You MUST use tools to perform actions. Do NOT pretend to execute commands or schedule tasks.\n\n");
+            for summary in tool_summaries {
+                prompt.push_str(&summary);
+                prompt.push_str("\n\n");
+            }
+        }
+
+        prompt.push_str("## Important Rules\n\n");
+        prompt.push_str("1. **ALWAYS use tools** - When you need to perform an action, you MUST call the appropriate tool.\n");
+        prompt.push_str("2. **Be helpful and accurate** - When using tools, briefly explain what you're doing.\n");
+        prompt
+            .push_str("3. **Memory** - When remembering something, write to memory/MEMORY.md\n\n");
+
+        if !channel.is_empty() && !chat_id.is_empty() {
+            prompt.push_str(&format!(
+                "## Current Session\nChannel: {}\nChat ID: {}\n",
+                channel, chat_id
+            ));
+        }
+
+        prompt
+    }
+
+    async fn run_llm_iteration(
+        &self,
+        messages: &mut Vec<Message>,
+        opts: &ProcessOptions,
+    ) -> anyhow::Result<(String, i32, bool)> {
+        let mut iteration = 0;
+        let mut final_content = String::new();
+        let mut sent_message_tool = false;
+
+        while iteration < self.max_iterations {
+            iteration += 1;
+            tracing::debug!("LLM iteration {}/{}", iteration, self.max_iterations);
+
+            let tool_defs = self.tools.lock().to_provider_defs();
+
+            let mut options = HashMap::new();
+            options.insert("max_tokens".to_string(), serde_json::json!(8192));
+            options.insert("temperature".to_string(), serde_json::json!(0.7));
+
+            let response = self
+                .provider
+                .chat_with_options(messages, Some(&tool_defs), &self.model, options)
+                .await?;
+
+            if response.tool_calls.is_empty() {
+                final_content = response.content;
+                if sent_message_tool {
+                    final_content.clear();
+                }
+                tracing::info!("LLM response without tool calls (direct answer)");
+                break;
+            }
+
+            let tool_names: Vec<String> = response
+                .tool_calls
+                .iter()
+                .filter_map(|tc| tc.name.clone())
+                .collect();
+            tracing::info!("LLM requested tool calls: {:?}", tool_names);
+
+            messages.push(Message {
+                role: "assistant".to_string(),
+                content: response.content.clone(),
+                tool_calls: response.tool_calls.clone(),
+                tool_call_id: None,
+            });
+
+            if !opts.no_history
+                && let Some(last) = messages.last()
+            {
+                self.sessions
+                    .lock()
+                    .add_full_message(&opts.session_key, last.clone());
+            }
+
+            for tc in &response.tool_calls {
+                let tool_name = tc.name.clone().unwrap_or_default();
+                let tool_args = tc.arguments.clone().unwrap_or_default();
+                tracing::info!("Executing tool: {}", tool_name);
+
+                let tool = { self.tools.lock().get(&tool_name) };
+                let result: ToolResult = if let Some(tool) = tool {
+                    tool.execute(tool_args, &opts.channel, &opts.chat_id).await
+                } else {
+                    ToolResult::error(&format!("Tool not found: {}", tool_name))
+                };
+
+                if tool_name == "message" && result.error.is_none() && result.silent {
+                    sent_message_tool = true;
+                }
+
+                if let Some(for_user) = result.for_user.as_ref()
+                    && !for_user.is_empty()
+                {
+                    let _ = self
+                        .bus
+                        .publish_outbound(OutboundMessage {
+                            channel: opts.channel.clone(),
+                            chat_id: opts.chat_id.clone(),
+                            content: for_user.clone(),
+                        })
+                        .await;
+                }
+
+                let content_for_llm = if let Some(err) = result.error.as_ref() {
+                    err.clone()
+                } else {
+                    result.for_llm.clone().unwrap_or_default()
+                };
+
+                messages.push(Message::tool(&content_for_llm, &tc.id));
+
+                if !opts.no_history
+                    && let Some(last) = messages.last()
+                {
+                    self.sessions
+                        .lock()
+                        .add_full_message(&opts.session_key, last.clone());
+                }
+            }
+        }
+
+        Ok((final_content, iteration, sent_message_tool))
+    }
+
+    fn update_tool_contexts(&self, _channel: &str, _chat_id: &str) {}
+
+    fn maybe_summarize(&self, session_key: &str, _channel: &str, _chat_id: &str) {
+        let history = self.sessions.lock().get_history(session_key);
+        let token_estimate = self.estimate_tokens(&history);
+        let threshold = self.context_window * 75 / 100;
+        if history.len() > 20 || token_estimate > threshold {
+            tracing::debug!("Session {} exceeds threshold, would summarize", session_key);
+        }
+    }
+
+    fn estimate_tokens(&self, messages: &[Message]) -> i32 {
+        let total_chars: usize = messages.iter().map(|m| m.content.chars().count()).sum();
+        (total_chars as f32 * 0.4) as i32
+    }
+
+    async fn handle_command(&self, msg: &InboundMessage) -> anyhow::Result<String> {
+        let content = msg.content.trim();
+        if !content.starts_with('/') {
+            return Ok(String::new());
+        }
+
+        let parts: Vec<&str> = content.split_whitespace().collect();
+        if parts.is_empty() {
+            return Ok(String::new());
+        }
+
+        let cmd = parts[0];
+        let args = &parts[1..];
+        match cmd {
+            "/help" | "/start" => {
+                Ok("Available commands: /help, /model, /status, /show, /list, /switch".to_string())
+            }
+            "/model" => Ok(format!("Current model: {}", self.model)),
+            "/status" => Ok("Agent is running".to_string()),
+            "/show" => self.handle_show_command(args).await,
+            "/list" => self.handle_list_command(args).await,
+            "/switch" => self.handle_switch_command(args).await,
+            _ => Ok(format!("Unknown command: {}", cmd)),
+        }
+    }
+
+    async fn handle_show_command(&self, args: &[&str]) -> anyhow::Result<String> {
+        if args.is_empty() {
+            return Ok("Usage: /show [model|channel]".to_string());
+        }
+        match args[0] {
+            "model" => Ok(format!("Current model: {}", self.model)),
+            "channel" => Ok("Current channel: cli".to_string()),
+            _ => Ok(format!("Unknown show target: {}", args[0])),
+        }
+    }
+
+    async fn handle_list_command(&self, args: &[&str]) -> anyhow::Result<String> {
+        if args.is_empty() {
+            return Ok("Usage: /list [models|channels]".to_string());
+        }
+
+        match args[0] {
+            "models" => Ok(
+                "Available models: glm-4.7, claude-3-5-sonnet, gpt-4o (configured in config)"
+                    .to_string(),
+            ),
+            "channels" => {
+                let manager = self.channel_manager.read();
+                if let Some(cm) = manager.as_ref() {
+                    let channels = cm.get_enabled_channels();
+                    if channels.is_empty() {
+                        return Ok("No channels enabled".to_string());
+                    }
+                    Ok(format!("Enabled channels: {}", channels.join(", ")))
+                } else {
+                    Ok("Channel manager not initialized".to_string())
+                }
+            }
+            _ => Ok(format!("Unknown list target: {}", args[0])),
+        }
+    }
+
+    async fn handle_switch_command(&self, args: &[&str]) -> anyhow::Result<String> {
+        if args.len() < 3 || args[1] != "to" {
+            return Ok("Usage: /switch [model|channel] to <name>".to_string());
+        }
+        match args[0] {
+            "model" => Ok(format!("Switch requested: {} -> {}", self.model, args[2])),
+            "channel" => Ok(format!("Switched target channel to {}", args[2])),
+            _ => Ok(format!("Unknown switch target: {}", args[0])),
+        }
+    }
+
+    pub async fn run(&self) -> anyhow::Result<()> {
+        self.running.store(true, Ordering::SeqCst);
+        let mut rx = self.bus.take_inbound_receiver()?;
+
+        while self.running.load(Ordering::SeqCst) {
+            tokio::select! {
+                msg = rx.recv() => {
+                    match msg {
+                        Some(msg) => {
+                            if let Err(err) = self.process_message(msg).await {
+                                tracing::error!("Error processing message: {}", err);
+                            }
+                        }
+                        None => {
+                            tracing::warn!("Inbound bus channel closed");
+                            break;
+                        }
+                    }
+                }
+                _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn stop(&self) {
+        self.running.store(false, Ordering::SeqCst);
+    }
+
+    pub fn get_startup_info(&self) -> serde_json::Value {
+        let tools = self.tools.lock();
+        serde_json::json!({
+            "tools": {
+                "count": tools.len(),
+                "names": tools.list_names()
+            },
+            "skills": {
+                "total": 0,
+                "available": 0
+            }
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    struct NoopProvider;
+
+    #[async_trait::async_trait]
+    impl Provider for NoopProvider {
+        async fn chat_with_options(
+            &self,
+            _messages: &mut Vec<Message>,
+            _tools: Option<&[crate::providers::ToolDefinition]>,
+            _model: &str,
+            _options: HashMap<String, serde_json::Value>,
+        ) -> anyhow::Result<crate::providers::LlmResponse> {
+            Ok(crate::providers::LlmResponse {
+                content: "ok".to_string(),
+                tool_calls: Vec::new(),
+                finish_reason: Some("stop".to_string()),
+                usage: None,
+            })
+        }
+    }
+
+    fn test_agent() -> AgentLoop {
+        let tmp = TempDir::new().expect("tempdir");
+        let mut cfg = Config::default();
+        cfg.agents.defaults.workspace = tmp.path().to_string_lossy().to_string();
+        let bus = Arc::new(MessageBus::new());
+        AgentLoop::new(&cfg, &bus, Arc::new(NoopProvider))
+    }
+
+    #[tokio::test]
+    async fn start_command_returns_help() {
+        let agent = test_agent();
+        let response = agent
+            .process_message(InboundMessage {
+                channel: "telegram".to_string(),
+                sender_id: "u1".to_string(),
+                chat_id: "c1".to_string(),
+                content: "/start".to_string(),
+                media: None,
+                session_key: "telegram:c1".to_string(),
+                metadata: None,
+            })
+            .await
+            .expect("command should work");
+        assert!(response.contains("Available commands"));
+    }
+
+    #[tokio::test]
+    async fn list_channels_without_manager_is_explicit() {
+        let agent = test_agent();
+        let response = agent
+            .process_message(InboundMessage {
+                channel: "telegram".to_string(),
+                sender_id: "u1".to_string(),
+                chat_id: "c1".to_string(),
+                content: "/list channels".to_string(),
+                media: None,
+                session_key: "telegram:c1".to_string(),
+                metadata: None,
+            })
+            .await
+            .expect("command should work");
+        assert_eq!(response, "Channel manager not initialized");
+    }
+}
