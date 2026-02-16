@@ -11,7 +11,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::task::JoinHandle;
 
 use crate::bus::{InboundMessage, MessageBus, OutboundMessage};
-use crate::config::{Config, TelegramConfig};
+use crate::config::Config;
+use crate::voice::GroqTranscriber;
 
 #[async_trait]
 pub trait Channel: Send + Sync {
@@ -41,7 +42,6 @@ impl BaseChannel {
     fn set_running(&self, running: bool) {
         self.running.store(running, Ordering::SeqCst);
     }
-
 }
 
 fn split_compound_sender(sender: &str) -> (&str, &str) {
@@ -81,21 +81,24 @@ struct TelegramChannel {
     token: String,
     bus: Arc<MessageBus>,
     client: Client,
+    transcriber: Option<GroqTranscriber>,
     task: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl TelegramChannel {
-    fn new(cfg: &TelegramConfig, bus: Arc<MessageBus>) -> Result<Self> {
-        if cfg.token.trim().is_empty() {
+    fn new(cfg: &Config, bus: Arc<MessageBus>) -> Result<Self> {
+        let telegram = &cfg.channels.telegram;
+        if telegram.token.trim().is_empty() {
             return Err(anyhow!(
                 "telegram token is required when channel is enabled"
             ));
         }
         Ok(Self {
-            base: BaseChannel::new(cfg.allow_from.clone()),
-            token: cfg.token.clone(),
+            base: BaseChannel::new(telegram.allow_from.clone()),
+            token: telegram.token.clone(),
             bus,
             client: Client::new(),
+            transcriber: resolve_transcriber(cfg),
             task: Mutex::new(None),
         })
     }
@@ -140,6 +143,7 @@ impl Channel for TelegramChannel {
         let bus = self.bus.clone();
         let client = self.client.clone();
         let allow_list = self.base.allow_list.clone();
+        let transcriber = self.transcriber.clone();
         let running = Arc::new(AtomicBool::new(true));
         let running_ref = running.clone();
 
@@ -167,7 +171,13 @@ impl Channel for TelegramChannel {
                                         continue;
                                     }
 
-                                    let content = build_message_content(&msg);
+                                    let (content, media) = build_message_content_with_media(
+                                        &client,
+                                        &token,
+                                        &msg,
+                                        transcriber.as_ref(),
+                                    )
+                                    .await;
                                     if content.is_empty() {
                                         continue;
                                     }
@@ -183,7 +193,7 @@ impl Channel for TelegramChannel {
                                         chat_id: chat_id.clone(),
                                         content,
                                         session_key: format!("telegram:{}", chat_id),
-                                        media: None,
+                                        media,
                                         metadata: None,
                                     };
                                     if let Err(err) = bus.publish_inbound(inbound).await {
@@ -249,10 +259,10 @@ struct TelegramMessage {
     from: Option<TelegramUser>,
     text: Option<String>,
     caption: Option<String>,
-    voice: Option<serde_json::Value>,
-    audio: Option<serde_json::Value>,
+    voice: Option<TelegramVoice>,
+    audio: Option<TelegramAudio>,
     video_note: Option<serde_json::Value>,
-    document: Option<serde_json::Value>,
+    document: Option<TelegramDocument>,
 }
 
 #[derive(Deserialize)]
@@ -266,6 +276,32 @@ struct TelegramUser {
     username: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct TelegramVoice {
+    file_id: String,
+}
+
+#[derive(Deserialize)]
+struct TelegramAudio {
+    file_id: String,
+}
+
+#[derive(Deserialize)]
+struct TelegramDocument {
+    file_id: String,
+}
+
+#[derive(Deserialize)]
+struct TelegramGetFileResponse {
+    ok: bool,
+    result: Option<TelegramFile>,
+}
+
+#[derive(Deserialize)]
+struct TelegramFile {
+    file_path: Option<String>,
+}
+
 fn build_sender_id(msg: &TelegramMessage) -> String {
     if let Some(from) = &msg.from {
         if let Some(username) = &from.username {
@@ -276,8 +312,15 @@ fn build_sender_id(msg: &TelegramMessage) -> String {
     "unknown".to_string()
 }
 
-fn build_message_content(msg: &TelegramMessage) -> String {
+async fn build_message_content_with_media(
+    client: &Client,
+    token: &str,
+    msg: &TelegramMessage,
+    transcriber: Option<&GroqTranscriber>,
+) -> (String, Option<Vec<String>>) {
     let mut content = String::new();
+    let mut media_paths = Vec::new();
+
     if let Some(text) = &msg.text {
         content.push_str(text);
     }
@@ -287,22 +330,113 @@ fn build_message_content(msg: &TelegramMessage) -> String {
         }
         content.push_str(caption);
     }
+
+    if let Some(voice) = &msg.voice
+        && let Some(path) = download_telegram_file(client, token, &voice.file_id, ".ogg").await
+    {
+        media_paths.push(path.clone());
+        if !content.is_empty() {
+            content.push('\n');
+        }
+        let voice_text = if let Some(tr) = transcriber {
+            if tr.is_available() {
+                match tr.transcribe(std::path::Path::new(&path)).await {
+                    Ok(r) if !r.text.trim().is_empty() => {
+                        format!("[voice transcription: {}]", r.text)
+                    }
+                    Ok(_) => "[voice]".to_string(),
+                    Err(_) => "[voice (transcription failed)]".to_string(),
+                }
+            } else {
+                "[voice]".to_string()
+            }
+        } else {
+            "[voice]".to_string()
+        };
+        content.push_str(&voice_text);
+    }
+
+    if let Some(audio) = &msg.audio
+        && let Some(path) = download_telegram_file(client, token, &audio.file_id, ".mp3").await
+    {
+        media_paths.push(path);
+        if !content.is_empty() {
+            content.push('\n');
+        }
+        content.push_str("[audio]");
+    }
+
+    if let Some(doc) = &msg.document
+        && let Some(path) = download_telegram_file(client, token, &doc.file_id, "").await
+    {
+        media_paths.push(path);
+        if !content.is_empty() {
+            content.push('\n');
+        }
+        content.push_str("[file]");
+    }
+
     if content.is_empty() {
-        if msg.voice.is_some() {
-            content = "[voice unsupported in MVP]".to_string();
-        } else if msg.audio.is_some() {
-            content = "[audio unsupported in MVP]".to_string();
-        } else if msg.video_note.is_some() {
+        if msg.video_note.is_some() {
             content = "[video note unsupported in MVP]".to_string();
-        } else if msg.document.is_some() {
-            content = "[document unsupported in MVP]".to_string();
+        } else if !media_paths.is_empty() {
+            content = "[media]".to_string();
+        } else {
+            content = "[empty message]".to_string();
         }
     }
-    if content.is_empty() {
-        "[empty message]".to_string()
+
+    let media = if media_paths.is_empty() {
+        None
     } else {
-        content
+        Some(media_paths)
+    };
+    (content, media)
+}
+
+async fn download_telegram_file(
+    client: &Client,
+    token: &str,
+    file_id: &str,
+    ext: &str,
+) -> Option<String> {
+    let get_file_url = format!(
+        "https://api.telegram.org/bot{}/getFile?file_id={}",
+        token, file_id
+    );
+    let resp = client.get(&get_file_url).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
     }
+    let parsed = resp.json::<TelegramGetFileResponse>().await.ok()?;
+    if !parsed.ok {
+        return None;
+    }
+    let file_path = parsed.result.and_then(|r| r.file_path)?;
+    let url = format!("https://api.telegram.org/file/bot{}/{}", token, file_path);
+    let bytes = client.get(&url).send().await.ok()?.bytes().await.ok()?;
+    let mut name = file_path.replace('/', "_");
+    if !ext.is_empty() && !name.ends_with(ext) {
+        name.push_str(ext);
+    }
+    let local_path = std::env::temp_dir().join(name);
+    std::fs::write(&local_path, bytes).ok()?;
+    Some(local_path.to_string_lossy().to_string())
+}
+
+fn resolve_transcriber(cfg: &Config) -> Option<GroqTranscriber> {
+    let key = cfg
+        .providers
+        .groq
+        .api_key
+        .clone()
+        .filter(|v| !v.trim().is_empty())
+        .or_else(|| {
+            std::env::var("GROQ_API_KEY")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+        });
+    key.map(GroqTranscriber::new)
 }
 
 fn markdown_to_telegram_html(input: &str) -> String {
@@ -325,7 +459,7 @@ impl ChannelManager {
         let mut channels: HashMap<String, Arc<dyn Channel>> = HashMap::new();
 
         if config.channels.telegram.enabled {
-            let telegram = TelegramChannel::new(&config.channels.telegram, bus.clone())?;
+            let telegram = TelegramChannel::new(config, bus.clone())?;
             channels.insert("telegram".to_string(), Arc::new(telegram));
         }
 
@@ -378,7 +512,6 @@ impl ChannelManager {
         }
         Ok(())
     }
-
 }
 
 #[cfg(test)]
@@ -390,13 +523,7 @@ mod tests {
         assert!(is_allowed_sender(&[], "anyone"));
         assert!(is_allowed_sender(&["123456".to_string()], "123456|alice"));
         assert!(is_allowed_sender(&["@alice".to_string()], "123456|alice"));
-        assert!(is_allowed_sender(
-            &["123456|alice".to_string()],
-            "123456"
-        ));
-        assert!(!is_allowed_sender(
-            &["123456".to_string()],
-            "654321|bob"
-        ));
+        assert!(is_allowed_sender(&["123456|alice".to_string()], "123456"));
+        assert!(!is_allowed_sender(&["123456".to_string()], "654321|bob"));
     }
 }

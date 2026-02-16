@@ -6,6 +6,9 @@ use std::path::PathBuf;
 
 use crate::providers::Message as ProviderMessage;
 
+/// Maximum number of messages kept in a session before trimming.
+const MAX_HISTORY: usize = 200;
+
 /// Session manager
 pub struct SessionManager {
     sessions_dir: PathBuf,
@@ -26,14 +29,35 @@ impl SessionManager {
         }
     }
 
-    /// Get or create a session
+    /// Get or create a session, loading from disk if needed.
     fn get_or_create(&mut self, key: &str) -> &mut Session {
-        self.sessions
-            .entry(key.to_string())
-            .or_insert_with(|| Session {
+        if !self.sessions.contains_key(key) {
+            let session = self.try_load_from_disk(key).unwrap_or(Session {
                 messages: Vec::new(),
                 summary: String::new(),
-            })
+            });
+            self.sessions.insert(key.to_string(), session);
+        }
+        self.sessions.get_mut(key).expect("just inserted")
+    }
+
+    /// Try to load a session from disk.
+    fn try_load_from_disk(&self, key: &str) -> Option<Session> {
+        let path = self.session_file_path(key);
+        let data = std::fs::read_to_string(&path).ok()?;
+        let messages: Vec<ProviderMessage> = serde_json::from_str(&data).ok()?;
+        Some(Session {
+            messages,
+            summary: String::new(),
+        })
+    }
+
+    /// Trim messages to MAX_HISTORY, keeping the most recent.
+    fn trim_history(messages: &mut Vec<ProviderMessage>) {
+        if messages.len() > MAX_HISTORY {
+            let drain_count = messages.len() - MAX_HISTORY;
+            messages.drain(..drain_count);
+        }
     }
 
     /// Add a message to a session
@@ -45,28 +69,26 @@ impl SessionManager {
             tool_calls: vec![],
             tool_call_id: None,
         });
+        Self::trim_history(&mut session.messages);
     }
 
     /// Add a full message (with tool calls)
     pub fn add_full_message(&mut self, key: &str, msg: ProviderMessage) {
         let session = self.get_or_create(key);
         session.messages.push(msg);
+        Self::trim_history(&mut session.messages);
     }
 
     /// Get session history
-    pub fn get_history(&self, key: &str) -> Vec<ProviderMessage> {
-        self.sessions
-            .get(key)
-            .map(|s| s.messages.clone())
-            .unwrap_or_default()
+    pub fn get_history(&mut self, key: &str) -> Vec<ProviderMessage> {
+        let session = self.get_or_create(key);
+        session.messages.clone()
     }
 
     /// Get session summary
-    pub fn get_summary(&self, key: &str) -> String {
-        self.sessions
-            .get(key)
-            .map(|s| s.summary.clone())
-            .unwrap_or_default()
+    pub fn get_summary(&mut self, key: &str) -> String {
+        let session = self.get_or_create(key);
+        session.summary.clone()
     }
 
     /// Save session to disk

@@ -1,5 +1,4 @@
-
-//! PicoClaw - Ultra-lightweight personal AI agent
+//! PicoRS - Ultra-lightweight personal AI agent
 //! Rust port from Go version
 
 mod agent;
@@ -8,15 +7,20 @@ mod bus;
 mod channels;
 mod config;
 mod constants;
+mod context_builder;
 mod cron;
+mod devices;
 mod health;
 mod heartbeat;
 mod logger;
+mod memory;
 mod migrate;
 mod providers;
 mod session;
+mod skills;
 mod state;
 mod tools;
+mod voice;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -62,8 +66,12 @@ enum Commands {
         force: bool,
     },
     Auth {
-        #[arg(short, long)]
-        subcommand: Option<String>,
+        #[command(subcommand)]
+        command: Option<AuthCommands>,
+    },
+    Skills {
+        #[command(subcommand)]
+        command: Option<SkillsCommands>,
     },
     Version,
 }
@@ -101,6 +109,32 @@ enum CronCommands {
     },
 }
 
+#[derive(Subcommand, Debug)]
+enum AuthCommands {
+    Login {
+        #[arg(short, long)]
+        provider: Option<String>,
+        #[arg(long, default_value_t = false)]
+        device_code: bool,
+        #[arg(long)]
+        token: Option<String>,
+    },
+    Logout {
+        #[arg(short, long)]
+        provider: Option<String>,
+    },
+    Status,
+}
+
+#[derive(Subcommand, Debug)]
+enum SkillsCommands {
+    List,
+    Install { repo: String },
+    Remove { name: String },
+    Search,
+    Show { name: String },
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let log_level = if cli.debug {
@@ -126,7 +160,8 @@ fn main() -> Result<()> {
             workspace_only,
             force,
         } => migrate_cmd(dry_run, config_only, workspace_only, force),
-        Commands::Auth { subcommand } => auth_cmd(subcommand),
+        Commands::Auth { command } => auth_cmd(command),
+        Commands::Skills { command } => skills_cmd(command),
     }
 }
 
@@ -166,12 +201,7 @@ fn create_workspace_templates(workspace: &std::path::Path) -> Result<()> {
     use std::fs;
 
     // Create necessary directories
-    let dirs = [
-        "memory",
-        "cron",
-        "agents",
-        "data",
-    ];
+    let dirs = ["memory", "cron", "agents", "data"];
 
     for dir in dirs {
         let path = workspace.join(dir);
@@ -306,6 +336,15 @@ fn gateway_cmd(_debug: bool) -> Result<()> {
         heartbeat_service.set_bus(&msg_bus);
         heartbeat_service.start()?;
 
+        let mut devices_service = devices::Service::new(
+            devices::Config {
+                enabled: config.devices.enabled,
+                monitor_usb: config.devices.monitor_usb,
+            },
+            config.workspace_path(),
+        );
+        devices_service.set_bus(msg_bus.clone());
+        devices_service.start().await?;
 
         channel_manager.start_all().await?;
 
@@ -330,6 +369,7 @@ fn gateway_cmd(_debug: bool) -> Result<()> {
         agent_loop.stop();
         channel_manager.stop_all().await?;
         heartbeat_service.stop().await;
+        devices_service.stop();
         cron_service.stop();
         health_server.stop().await?;
         msg_bus.close();
@@ -517,30 +557,118 @@ fn migrate_cmd(dry_run: bool, config_only: bool, workspace_only: bool, force: bo
     Ok(())
 }
 
-fn auth_cmd(subcommand: Option<String>) -> Result<()> {
-    match subcommand.as_deref() {
-        Some("login") => {
-            println!("Auth login - OAuth/Token authentication");
-            println!("Usage: picors auth login --provider <name>");
-            println!("Supported providers: openai, anthropic");
+fn auth_cmd(command: Option<AuthCommands>) -> Result<()> {
+    match command {
+        Some(AuthCommands::Login {
+            provider,
+            device_code,
+            token,
+        }) => {
+            let provider = provider.unwrap_or_else(|| "openai".to_string());
+            if let Some(token) = token {
+                let cred = auth::AuthCredential::from_token(&provider, token, None);
+                auth::set_credential(&provider, cred)?;
+                println!("Saved token for provider: {}", provider);
+            } else if provider == "openai" {
+                auth::login_openai(device_code)?;
+            } else {
+                auth::login_paste_token(&provider)?;
+            }
         }
-        Some("logout") => {
-            println!("Auth logout");
-            auth::delete_all_credentials()?;
-            println!("Logged out from all providers");
+        Some(AuthCommands::Logout { provider }) => {
+            if let Some(provider) = provider {
+                auth::delete_credential(&provider)?;
+                println!("Logged out from provider: {}", provider);
+            } else {
+                auth::delete_all_credentials()?;
+                println!("Logged out from all providers");
+            }
         }
-        Some("status") => {
-            println!("Auth status");
+        Some(AuthCommands::Status) => {
             auth::show_status()?;
         }
-        _ => {
-            println!("Auth commands: login, logout, status");
-            println!("Usage:");
-            println!("  picors auth login --provider <name>");
-            println!("  picors auth logout --provider <name>");
+        None => {
+            println!("Auth commands:");
+            println!("  picors auth login --provider <name> [--token <token>] [--device-code]");
+            println!("  picors auth logout [--provider <name>]");
             println!("  picors auth status");
         }
     }
+    Ok(())
+}
 
+fn skills_cmd(command: Option<SkillsCommands>) -> Result<()> {
+    let cfg_path = config::get_config_path()?;
+    let cfg = config::load_config(&cfg_path)?;
+    let workspace = cfg.workspace_path();
+    let loader = skills::SkillsLoader::new(&workspace);
+    let installer = skills::SkillInstaller::new(&workspace);
+
+    match command {
+        Some(SkillsCommands::List) => {
+            let skills = loader.list_skills();
+            if skills.is_empty() {
+                println!("No skills installed.");
+            } else {
+                println!("Installed skills:");
+                for s in skills {
+                    println!(
+                        "  - {} [{}] {}",
+                        s.name,
+                        s.source,
+                        if s.description.is_empty() {
+                            "(no description)"
+                        } else {
+                            &s.description
+                        }
+                    );
+                }
+            }
+        }
+        Some(SkillsCommands::Install { repo }) => {
+            let rt = tokio::runtime::Runtime::new()?;
+            let installed = rt.block_on(async { installer.install_from_github(&repo).await })?;
+            println!("Installed skill: {}", installed);
+        }
+        Some(SkillsCommands::Remove { name }) => {
+            installer.uninstall(&name)?;
+            println!("Removed skill: {}", name);
+        }
+        Some(SkillsCommands::Search) => {
+            let rt = tokio::runtime::Runtime::new()?;
+            let available = rt.block_on(async { installer.list_available_skills().await })?;
+            if available.is_empty() {
+                println!("No skills found.");
+            } else {
+                for s in available {
+                    println!("  - {} ({})", s.name, s.repository);
+                    if !s.description.is_empty() {
+                        println!("    {}", s.description);
+                    }
+                    if !s.author.is_empty() {
+                        println!("    by {}", s.author);
+                    }
+                    if !s.tags.is_empty() {
+                        println!("    tags: {}", s.tags.join(", "));
+                    }
+                }
+            }
+        }
+        Some(SkillsCommands::Show { name }) => {
+            if let Some(content) = loader.load_skill(&name) {
+                println!("{}", content);
+            } else {
+                println!("Skill not found: {}", name);
+            }
+        }
+        None => {
+            println!("Skills commands:");
+            println!("  picors skills list");
+            println!("  picors skills install <owner/repo/path>");
+            println!("  picors skills remove <name>");
+            println!("  picors skills search");
+            println!("  picors skills show <name>");
+        }
+    }
     Ok(())
 }

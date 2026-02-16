@@ -20,7 +20,7 @@ pub fn migrate_from_openclaw(
     workspace_only: bool,
     force: bool,
     openclaw_home: Option<&str>,
-    picoclaw_home: Option<&str>,
+    picors_home: Option<&str>,
 ) -> Result<MigrateResult> {
     if config_only && workspace_only {
         return Err(anyhow!(
@@ -29,7 +29,7 @@ pub fn migrate_from_openclaw(
     }
 
     let source_home = resolve_home(openclaw_home, ".picoclaw")?;
-    let target_home = resolve_home(picoclaw_home, ".picors")?;
+    let target_home = resolve_home(picors_home, ".picors")?;
     let mut result = MigrateResult::default();
 
     if !workspace_only {

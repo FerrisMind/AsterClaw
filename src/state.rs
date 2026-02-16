@@ -11,7 +11,7 @@ struct PersistedState {
 }
 
 pub struct Manager {
-    _workspace: PathBuf,
+    workspace: PathBuf,
     state_file: PathBuf,
     data: Mutex<PersistedState>,
 }
@@ -32,7 +32,7 @@ impl Manager {
         };
 
         Self {
-            _workspace: workspace,
+            workspace,
             state_file,
             data: Mutex::new(data),
         }
@@ -41,6 +41,15 @@ impl Manager {
     pub fn set_last_channel(&self, channel: &str) {
         self.data.lock().last_channel = Some(channel.to_string());
         let _ = self.save_atomic();
+    }
+
+    pub fn get_last_channel(&self) -> String {
+        self.data
+            .lock()
+            .last_channel
+            .as_ref()
+            .map(|s| s.to_string())
+            .unwrap_or_default()
     }
 
     fn save_atomic(&self) -> anyhow::Result<()> {
@@ -58,4 +67,23 @@ impl Manager {
         temp.persist(&self.state_file)?;
         Ok(())
     }
+}
+
+impl Clone for Manager {
+    fn clone(&self) -> Self {
+        Self::new(self.workspace.clone())
+    }
+}
+
+/// Parse a `"platform:user_id"` string into `(platform, user_id)`.
+/// Returns `None` if the format is invalid.
+pub fn parse_last_channel(raw: &str) -> Option<(&str, &str)> {
+    if raw.is_empty() {
+        return None;
+    }
+    let (platform, user_id) = raw.split_once(':')?;
+    if platform.is_empty() || user_id.is_empty() {
+        return None;
+    }
+    Some((platform, user_id))
 }

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCall {
     pub id: String,
-    #[serde(default)]
+    #[serde(rename = "type", default)]
     pub tool_type: String,
     #[serde(default)]
     pub function: Option<FunctionCall>,
@@ -88,6 +88,7 @@ impl Message {
 /// Tool definition for function calling
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolDefinition {
+    #[serde(rename = "type")]
     pub tool_type: String,
     pub function: ToolFunctionDefinition,
 }

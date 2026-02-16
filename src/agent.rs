@@ -2,7 +2,6 @@
 
 use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -10,21 +9,22 @@ use crate::bus::{InboundMessage, MessageBus, OutboundMessage};
 use crate::channels::ChannelManager;
 use crate::config::Config;
 use crate::constants;
+use crate::context_builder::ContextBuilder;
 use crate::providers::{Message, ProcessOptions, Provider};
 use crate::session::SessionManager;
 use crate::state::Manager as StateManager;
-use crate::tools::{ToolRegistry, ToolResult};
+use crate::tools::{SubagentManager, ToolRegistry, ToolResult};
 
 pub struct AgentLoop {
     bus: Arc<MessageBus>,
     provider: Arc<dyn Provider>,
-    workspace: PathBuf,
     model: String,
     context_window: i32,
     max_iterations: i32,
     sessions: Arc<Mutex<SessionManager>>,
     state: Arc<Mutex<StateManager>>,
     tools: Arc<Mutex<ToolRegistry>>,
+    context_builder: ContextBuilder,
     running: AtomicBool,
     channel_manager: Arc<RwLock<Option<Arc<ChannelManager>>>>,
 }
@@ -34,21 +34,31 @@ impl AgentLoop {
         let workspace = config.workspace_path();
         let sessions = Arc::new(Mutex::new(SessionManager::new(workspace.join("sessions"))));
         let state = Arc::new(Mutex::new(StateManager::new(workspace.clone())));
-        let tools = Arc::new(Mutex::new(ToolRegistry::new(
+        let tool_registry = ToolRegistry::new(
             workspace.clone(),
             config.agents.defaults.restrict_to_workspace,
-        )));
+        );
+        let subagent_manager = Arc::new(SubagentManager::new(
+            provider.clone(),
+            config.agents.defaults.model.clone(),
+            msg_bus.clone(),
+            tool_registry.clone(),
+            config.agents.defaults.max_tool_iterations,
+        ));
+        tool_registry.set_subagent_manager(subagent_manager);
+        let tools = Arc::new(Mutex::new(tool_registry));
+        let context_builder = ContextBuilder::new(workspace.clone());
 
         Self {
             bus: msg_bus.clone(),
             provider,
-            workspace,
             model: config.agents.defaults.model.clone(),
             context_window: config.agents.defaults.max_tokens,
             max_iterations: config.agents.defaults.max_tool_iterations,
             sessions,
             state,
             tools,
+            context_builder,
             running: AtomicBool::new(false),
             channel_manager: Arc::new(RwLock::new(None)),
         }
@@ -79,7 +89,20 @@ impl AgentLoop {
         }
 
         if msg.content.starts_with('/') {
-            return self.handle_command(&msg).await;
+            let response = self.handle_command(&msg).await?;
+            if !response.is_empty()
+                && let Err(err) = self
+                    .bus
+                    .publish_outbound(OutboundMessage {
+                        channel: msg.channel.clone(),
+                        chat_id: msg.chat_id.clone(),
+                        content: response.clone(),
+                    })
+                    .await
+            {
+                tracing::error!("failed to publish command response: {}", err);
+            }
+            return Ok(response);
         }
 
         let opts = ProcessOptions {
@@ -94,34 +117,68 @@ impl AgentLoop {
 
         let response = self.run_agent_loop(opts).await?;
 
-        if !response.is_empty() {
-            let _ = self
+        if !response.is_empty()
+            && let Err(err) = self
                 .bus
                 .publish_outbound(OutboundMessage {
                     channel: msg.channel,
                     chat_id: msg.chat_id,
                     content: response.clone(),
                 })
-                .await;
+                .await
+        {
+            tracing::error!("failed to publish outbound response: {}", err);
         }
 
         Ok(response)
     }
 
     async fn process_system_message(&self, msg: InboundMessage) -> anyhow::Result<String> {
-        let origin_channel = if let Some(idx) = msg.chat_id.find(':') {
-            msg.chat_id[..idx].to_string()
+        // heartbeat/system path can carry origin as "channel:chat_id"
+        let (origin_channel, origin_chat) = if let Some(idx) = msg.chat_id.find(':') {
+            (
+                msg.chat_id[..idx].to_string(),
+                msg.chat_id[idx + 1..].to_string(),
+            )
         } else {
-            "cli".to_string()
+            ("cli".to_string(), "direct".to_string())
         };
 
         if constants::is_internal_channel(&origin_channel) {
-            tracing::info!("Subagent completed (internal channel): {}", origin_channel);
+            tracing::info!("System message on internal channel: {}", origin_channel);
             return Ok(String::new());
         }
 
-        tracing::info!("Subagent completed: channel={}", origin_channel);
-        Ok(String::new())
+        let prompt = if msg.content.trim().is_empty() {
+            "HEARTBEAT_OK".to_string()
+        } else {
+            msg.content.clone()
+        };
+
+        let response = self
+            .run_agent_loop(ProcessOptions {
+                session_key: format!("system:{}:{}", origin_channel, origin_chat),
+                channel: origin_channel.clone(),
+                chat_id: origin_chat.clone(),
+                user_message: prompt,
+                default_response: "HEARTBEAT_OK".to_string(),
+                enable_summary: false,
+                no_history: true,
+            })
+            .await?;
+
+        if !response.is_empty() && response != "HEARTBEAT_OK" {
+            let _ = self
+                .bus
+                .publish_outbound(OutboundMessage {
+                    channel: origin_channel,
+                    chat_id: origin_chat,
+                    content: response.clone(),
+                })
+                .await;
+        }
+
+        Ok(response)
     }
 
     async fn run_agent_loop(&self, opts: ProcessOptions) -> anyhow::Result<String> {
@@ -200,70 +257,15 @@ impl AgentLoop {
         channel: &str,
         chat_id: &str,
     ) -> Vec<Message> {
-        let mut messages = Vec::new();
-        let system_prompt = self.build_system_prompt(channel, chat_id);
-
-        let mut system_with_summary = system_prompt;
-        if !summary.is_empty() {
-            system_with_summary += "\n\n## Summary of Previous Conversation\n\n";
-            system_with_summary += &summary;
-        }
-
-        messages.push(Message::system(&system_with_summary));
-        messages.extend(history);
-        messages.push(Message::user(current_message));
-        messages
-    }
-
-    fn build_system_prompt(&self, channel: &str, chat_id: &str) -> String {
-        let mut prompt = String::new();
-        prompt.push_str("# PicoClaw 🦞\n\n");
-        prompt.push_str("You are picoclaw, a helpful AI assistant.\n\n");
-
-        let now = chrono::Local::now().format("%Y-%m-%d %H:%M (%A)");
-        prompt.push_str(&format!("## Current Time\n{}\n\n", now));
-
-        prompt.push_str(&format!(
-            "## Workspace\nYour workspace is at: {}\n",
-            self.workspace.display()
-        ));
-        prompt.push_str(&format!(
-            "- Memory: {}/memory/MEMORY.md\n",
-            self.workspace.display()
-        ));
-        prompt.push_str(&format!(
-            "- Daily Notes: {}/memory/YYYYMM/YYYYMMDD.md\n",
-            self.workspace.display()
-        ));
-        prompt.push_str(&format!(
-            "- Skills: {}/skills/{{skill-name}}/SKILL.md\n\n",
-            self.workspace.display()
-        ));
-
         let tool_summaries = self.tools.lock().get_summaries();
-        if !tool_summaries.is_empty() {
-            prompt.push_str("## Available Tools\n\n");
-            prompt.push_str("**CRITICAL**: You MUST use tools to perform actions. Do NOT pretend to execute commands or schedule tasks.\n\n");
-            for summary in tool_summaries {
-                prompt.push_str(&summary);
-                prompt.push_str("\n\n");
-            }
-        }
-
-        prompt.push_str("## Important Rules\n\n");
-        prompt.push_str("1. **ALWAYS use tools** - When you need to perform an action, you MUST call the appropriate tool.\n");
-        prompt.push_str("2. **Be helpful and accurate** - When using tools, briefly explain what you're doing.\n");
-        prompt
-            .push_str("3. **Memory** - When remembering something, write to memory/MEMORY.md\n\n");
-
-        if !channel.is_empty() && !chat_id.is_empty() {
-            prompt.push_str(&format!(
-                "## Current Session\nChannel: {}\nChat ID: {}\n",
-                channel, chat_id
-            ));
-        }
-
-        prompt
+        self.context_builder.build_messages(
+            history,
+            summary,
+            current_message,
+            channel,
+            chat_id,
+            &tool_summaries,
+        )
     }
 
     async fn run_llm_iteration(
@@ -493,15 +495,13 @@ impl AgentLoop {
 
     pub fn get_startup_info(&self) -> serde_json::Value {
         let tools = self.tools.lock();
+        let skills = self.context_builder.get_skills_info();
         serde_json::json!({
             "tools": {
                 "count": tools.len(),
                 "names": tools.list_names()
             },
-            "skills": {
-                "total": 0,
-                "available": 0
-            }
+            "skills": skills
         })
     }
 }

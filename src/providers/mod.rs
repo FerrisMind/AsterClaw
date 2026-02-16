@@ -59,10 +59,14 @@ impl HttpProvider {
         options: &HashMap<String, serde_json::Value>,
     ) -> Result<LlmResponse> {
         let client = reqwest::Client::new();
+        let messages_json: Vec<serde_json::Value> = messages
+            .iter()
+            .map(normalize_message_for_provider)
+            .collect();
 
         let mut body = serde_json::json!({
             "model": model,
-            "messages": messages,
+            "messages": messages_json,
         });
 
         if let Some(tool_defs) = tools
@@ -117,6 +121,62 @@ impl HttpProvider {
     }
 }
 
+fn normalize_message_for_provider(message: &Message) -> serde_json::Value {
+    let mut out = serde_json::json!({
+        "role": message.role,
+        "content": message.content,
+    });
+
+    if let Some(tool_call_id) = message.tool_call_id.as_ref()
+        && !tool_call_id.trim().is_empty()
+    {
+        out["tool_call_id"] = serde_json::json!(tool_call_id);
+    }
+
+    if !message.tool_calls.is_empty() {
+        let mut calls = Vec::with_capacity(message.tool_calls.len());
+        for (idx, tc) in message.tool_calls.iter().enumerate() {
+            let id = if tc.id.trim().is_empty() {
+                format!("call_{}", idx + 1)
+            } else {
+                tc.id.clone()
+            };
+            let tool_type = if tc.tool_type.trim().is_empty() {
+                "function".to_string()
+            } else {
+                tc.tool_type.clone()
+            };
+            let name = tc
+                .function
+                .as_ref()
+                .map(|f| f.name.clone())
+                .or_else(|| tc.name.clone())
+                .unwrap_or_default();
+            let arguments = tc
+                .function
+                .as_ref()
+                .map(|f| f.arguments.clone())
+                .or_else(|| {
+                    tc.arguments
+                        .as_ref()
+                        .map(|m| serde_json::to_string(m).unwrap_or_else(|_| "{}".to_string()))
+                })
+                .unwrap_or_else(|| "{}".to_string());
+            calls.push(serde_json::json!({
+                "id": id,
+                "type": tool_type,
+                "function": {
+                    "name": name,
+                    "arguments": arguments,
+                }
+            }));
+        }
+        out["tool_calls"] = serde_json::Value::Array(calls);
+    }
+
+    out
+}
+
 #[async_trait]
 impl Provider for HttpProvider {
     async fn chat_with_options(
@@ -150,16 +210,25 @@ fn parse_openai_compatible_response(result: &serde_json::Value) -> Result<LlmRes
 
     let mut tool_calls = Vec::new();
     if let Some(tc) = message["tool_calls"].as_array() {
-        for t in tc {
-            let id = t["id"].as_str().unwrap_or("").to_string();
+        for (idx, t) in tc.iter().enumerate() {
+            let id = t["id"]
+                .as_str()
+                .map(str::to_string)
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| format!("call_{}", idx + 1));
             let name = t["function"]["name"].as_str().unwrap_or("").to_string();
             let args_str = t["function"]["arguments"].as_str().unwrap_or("{}");
             let args: HashMap<String, serde_json::Value> =
                 serde_json::from_str(args_str).unwrap_or_default();
+            let tool_type = t["type"]
+                .as_str()
+                .map(str::to_string)
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| "function".to_string());
 
             tool_calls.push(ToolCall {
                 id,
-                tool_type: "function".to_string(),
+                tool_type,
                 function: Some(FunctionCall {
                     name: name.clone(),
                     arguments: args_str.to_string(),
@@ -208,12 +277,7 @@ pub fn create_provider(config: &Config) -> Result<Arc<dyn Provider>> {
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| base_default.to_string());
 
-    let provider = HttpProvider::new(
-        api_key,
-        base_url,
-        extra_headers,
-        kind,
-    );
+    let provider = HttpProvider::new(api_key, base_url, extra_headers, kind);
 
     Ok(Arc::new(provider))
 }
@@ -328,7 +392,7 @@ mod tests {
     use axum::routing::post;
     use axum::{Json, Router};
     use once_cell::sync::Lazy;
-    use std::sync::Mutex;
+    use tokio::sync::Mutex;
     use tokio::sync::oneshot;
 
     static ENV_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
@@ -442,9 +506,70 @@ mod tests {
         assert_eq!(parsed.tool_calls[0].name.as_deref(), Some("read_file"));
     }
 
+    #[test]
+    fn normalize_message_serializes_openai_tool_call_shape() {
+        let msg = Message {
+            role: "assistant".to_string(),
+            content: "calling tool".to_string(),
+            tool_calls: vec![ToolCall {
+                id: "call_123".to_string(),
+                tool_type: "function".to_string(),
+                function: Some(FunctionCall {
+                    name: "read_file".to_string(),
+                    arguments: "{\"path\":\"README.md\"}".to_string(),
+                }),
+                name: None,
+                arguments: None,
+            }],
+            tool_call_id: None,
+        };
+
+        let v = normalize_message_for_provider(&msg);
+        assert_eq!(v["role"], "assistant");
+        assert_eq!(v["tool_calls"][0]["id"], "call_123");
+        assert_eq!(v["tool_calls"][0]["type"], "function");
+        assert_eq!(v["tool_calls"][0]["function"]["name"], "read_file");
+        assert_eq!(
+            v["tool_calls"][0]["function"]["arguments"],
+            "{\"path\":\"README.md\"}"
+        );
+    }
+
+    #[test]
+    fn normalize_message_serializes_tool_result_shape() {
+        let msg = Message::tool("done", "call_abc");
+        let v = normalize_message_for_provider(&msg);
+        assert_eq!(v["role"], "tool");
+        assert_eq!(v["tool_call_id"], "call_abc");
+        assert_eq!(v["content"], "done");
+    }
+
+    #[test]
+    fn parse_tool_calls_defaults_type_and_id() {
+        let payload = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "content": "",
+                    "tool_calls": [{
+                        "function": {
+                            "name": "read_file",
+                            "arguments": "{\"path\":\"README.md\"}"
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        });
+
+        let parsed = parse_openai_compatible_response(&payload).expect("parse should succeed");
+        assert_eq!(parsed.tool_calls.len(), 1);
+        assert_eq!(parsed.tool_calls[0].id, "call_1");
+        assert_eq!(parsed.tool_calls[0].tool_type, "function");
+    }
+
     #[tokio::test]
     async fn config_key_wins_over_env() {
-        let _guard = ENV_LOCK.lock().expect("lock");
+        let _guard = ENV_LOCK.lock().await;
         // SAFETY: guarded by ENV_LOCK to avoid concurrent env mutations in tests.
         unsafe { std::env::set_var("OPENAI_API_KEY", "env-key") };
 
@@ -470,7 +595,7 @@ mod tests {
 
     #[tokio::test]
     async fn env_fallback_works() {
-        let _guard = ENV_LOCK.lock().expect("lock");
+        let _guard = ENV_LOCK.lock().await;
         // SAFETY: guarded by ENV_LOCK to avoid concurrent env mutations in tests.
         unsafe { std::env::set_var("OPENAI_API_KEY", "env-key") };
 
@@ -493,9 +618,9 @@ mod tests {
         unsafe { std::env::remove_var("OPENAI_API_KEY") };
     }
 
-    #[test]
-    fn missing_key_returns_error() {
-        let _guard = ENV_LOCK.lock().expect("lock");
+    #[tokio::test]
+    async fn missing_key_returns_error() {
+        let _guard = ENV_LOCK.lock().await;
         // SAFETY: guarded by ENV_LOCK to avoid concurrent env mutations in tests.
         unsafe {
             std::env::remove_var("OPENAI_API_KEY");

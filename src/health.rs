@@ -64,13 +64,14 @@ impl HealthServer {
         let addr: SocketAddr = format!("{}:{}", self.host, self.port).parse()?;
         let listener = tokio::net::TcpListener::bind(addr).await?;
         let (tx, rx) = oneshot::channel::<()>();
-        self.ready.store(true, Ordering::SeqCst);
 
         let server = axum::serve(listener, app).with_graceful_shutdown(async move {
             let _ = rx.await;
         });
 
+        let ready_flag = self.ready.clone();
         let handle = tokio::spawn(async move {
+            ready_flag.store(true, Ordering::SeqCst);
             if let Err(err) = server.await {
                 tracing::error!("health server failed: {}", err);
             }

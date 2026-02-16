@@ -20,6 +20,8 @@ pub struct Config {
     pub tools: ToolsConfig,
     #[serde(default)]
     pub heartbeat: HeartbeatConfig,
+    #[serde(default)]
+    pub devices: DevicesConfig,
 }
 
 /// Agent configuration
@@ -93,7 +95,6 @@ pub struct ChannelsConfig {
     pub telegram: TelegramConfig,
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TelegramConfig {
     #[serde(default)]
@@ -105,11 +106,6 @@ pub struct TelegramConfig {
     #[serde(default)]
     pub allow_from: Vec<String>,
 }
-
-
-
-
-
 
 /// Providers configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -252,32 +248,58 @@ fn default_interval() -> i32 {
     30
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DevicesConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_true")]
+    pub monitor_usb: bool,
+}
+
+impl Default for DevicesConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            monitor_usb: true,
+        }
+    }
+}
 
 /// Get the config path (~/.picors/config.json)
 pub fn get_config_path() -> anyhow::Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot find home directory"))?;
+    let home = resolve_home_dir()?;
     Ok(home.join(".picors").join("config.json"))
 }
 
-/// Get legacy config path (~/.picoclaw/config.json).
+/// Get legacy config path (~/.picors/config.json).
 pub fn get_legacy_config_path() -> anyhow::Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot find home directory"))?;
-    Ok(home.join(".picoclaw").join("config.json"))
+    let home = resolve_home_dir()?;
+    Ok(home.join(".picors").join("config.json"))
+}
+
+fn resolve_home_dir() -> anyhow::Result<PathBuf> {
+    if let Ok(path) = std::env::var("PICORS_HOME") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            return Ok(PathBuf::from(trimmed));
+        }
+    }
+    dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot find home directory"))
 }
 
 /// Load config from file
 pub fn load_config(path: &Path) -> anyhow::Result<Config> {
     if path.exists() {
         let data = std::fs::read_to_string(path)?;
-        let config: Config = serde_json::from_str(&data)?;
+        let config: Config = parse_compat_json(&data)?;
         return Ok(config);
     }
 
-    // Dual compatibility mode: fall back to legacy ~/.picoclaw/config.json
+    // Dual compatibility mode: fall back to legacy ~/.picors/config.json
     let legacy = get_legacy_config_path()?;
     if legacy.exists() {
         let data = std::fs::read_to_string(&legacy)?;
-        let config: Config = serde_json::from_str(&data)?;
+        let config: Config = parse_compat_json(&data)?;
         return Ok(config);
     }
 
@@ -301,7 +323,6 @@ impl Config {
     pub fn workspace_path(&self) -> PathBuf {
         expand_home(&self.agents.defaults.workspace)
     }
-
 }
 
 /// Expand ~ to home directory
@@ -315,4 +336,66 @@ fn expand_home(path: &str) -> PathBuf {
         return home;
     }
     PathBuf::from(path)
+}
+
+fn parse_compat_json(data: &str) -> anyhow::Result<Config> {
+    let value: serde_json::Value = serde_json::from_str(data)?;
+    let normalized = normalize_keys(value);
+    let config: Config = serde_json::from_value(normalized)?;
+    Ok(config)
+}
+
+fn normalize_keys(value: serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(map) => {
+            let normalized = map
+                .into_iter()
+                .map(|(k, v)| (camel_to_snake(&k), normalize_keys(v)))
+                .collect();
+            serde_json::Value::Object(normalized)
+        }
+        serde_json::Value::Array(arr) => {
+            serde_json::Value::Array(arr.into_iter().map(normalize_keys).collect())
+        }
+        other => other,
+    }
+}
+
+fn camel_to_snake(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let chars: Vec<char> = input.chars().collect();
+    for (i, &c) in chars.iter().enumerate() {
+        if c.is_ascii_uppercase() {
+            if i > 0 {
+                let prev = chars[i - 1];
+                let next = chars.get(i + 1).copied().unwrap_or_default();
+                if prev.is_ascii_lowercase()
+                    || prev.is_ascii_digit()
+                    || (prev.is_ascii_uppercase() && next.is_ascii_lowercase())
+                {
+                    out.push('_');
+                }
+            }
+            out.push(c.to_ascii_lowercase());
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loads_camel_case_legacy_keys() {
+        let raw = r#"{
+            "agents": { "defaults": { "maxToolIterations": 7 } },
+            "devices": { "monitorUsb": false }
+        }"#;
+        let parsed = parse_compat_json(raw).expect("parse");
+        assert_eq!(parsed.agents.defaults.max_tool_iterations, 7);
+        assert!(!parsed.devices.monitor_usb);
+    }
 }

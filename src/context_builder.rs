@@ -1,0 +1,177 @@
+//! System prompt and message context builder.
+
+use crate::memory::MemoryStore;
+use crate::providers::Message;
+use crate::skills::SkillsLoader;
+use std::path::PathBuf;
+
+pub struct ContextBuilder {
+    workspace: PathBuf,
+    skills_loader: SkillsLoader,
+    memory: MemoryStore,
+}
+
+impl ContextBuilder {
+    pub fn new(workspace: PathBuf) -> Self {
+        let skills_loader = SkillsLoader::new(&workspace);
+        let memory = MemoryStore::new(workspace.clone());
+        Self {
+            workspace,
+            skills_loader,
+            memory,
+        }
+    }
+
+    pub fn get_skills_info(&self) -> serde_json::Value {
+        let skills = self.skills_loader.list_skills();
+        serde_json::json!({
+            "total": skills.len(),
+            "available": skills.len(),
+            "names": skills.into_iter().map(|s| s.name).collect::<Vec<_>>()
+        })
+    }
+
+    pub fn build_messages(
+        &self,
+        mut history: Vec<Message>,
+        summary: String,
+        current_message: &str,
+        channel: &str,
+        chat_id: &str,
+        tool_summaries: &[String],
+    ) -> Vec<Message> {
+        let mut messages = Vec::new();
+        let mut system_prompt = self.build_system_prompt(channel, chat_id, tool_summaries);
+        if !summary.is_empty() {
+            system_prompt.push_str("\n\n## Summary of Previous Conversation\n\n");
+            system_prompt.push_str(&summary);
+        }
+
+        // Avoid starting with orphan tool messages.
+        let orphan_count = history.iter().take_while(|m| m.role == "tool").count();
+        if orphan_count > 0 {
+            history.drain(..orphan_count);
+        }
+
+        messages.push(Message::system(&system_prompt));
+        messages.extend(history);
+        messages.push(Message::user(current_message));
+        messages
+    }
+
+    pub fn build_system_prompt(
+        &self,
+        channel: &str,
+        chat_id: &str,
+        tool_summaries: &[String],
+    ) -> String {
+        let now = chrono::Local::now().format("%Y-%m-%d %H:%M (%A)");
+        let runtime = format!(
+            "{} {}, Rust {}",
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+            env!("CARGO_PKG_VERSION")
+        );
+
+        let mut sections = Vec::new();
+        sections.push(format!(
+            "# picors 🦞\n\nYou are picors, a helpful AI assistant.\n\n## Current Time\n{}\n\n## Runtime\n{}\n\n## Workspace\nYour workspace is at: {}\n- Memory: {}/memory/MEMORY.md\n- Daily Notes: {}/memory/YYYYMM/YYYYMMDD.md\n- Skills: {}/skills/{{skill-name}}/SKILL.md",
+            now,
+            runtime,
+            self.workspace.display(),
+            self.workspace.display(),
+            self.workspace.display(),
+            self.workspace.display(),
+        ));
+
+        let tools_section = self.build_tools_section(tool_summaries);
+        if !tools_section.is_empty() {
+            sections.push(tools_section);
+        }
+
+        let bootstrap = self.load_bootstrap_files();
+        if !bootstrap.is_empty() {
+            sections.push(bootstrap);
+        }
+
+        let skills_summary = self.skills_loader.build_skills_summary_xml();
+        if !skills_summary.is_empty() {
+            sections.push(format!(
+                "# Skills\n\nThe following skills extend your capabilities. To use one, read SKILL.md via read_file.\n\n{}",
+                skills_summary
+            ));
+        }
+
+        let memory_context = self.memory.get_memory_context();
+        if !memory_context.is_empty() {
+            sections.push(memory_context);
+        }
+
+        sections.push(
+            "## Important Rules\n\n1. **ALWAYS use tools** - When you need to perform an action, you MUST call the appropriate tool.\n2. **Be helpful and accurate** - Briefly explain tool actions.\n3. **Memory** - Write persistent facts to memory/MEMORY.md".to_string(),
+        );
+
+        if !channel.is_empty() && !chat_id.is_empty() {
+            sections.push(format!(
+                "## Current Session\nChannel: {}\nChat ID: {}",
+                channel, chat_id
+            ));
+        }
+
+        sections.join("\n\n---\n\n")
+    }
+
+    fn build_tools_section(&self, tool_summaries: &[String]) -> String {
+        if tool_summaries.is_empty() {
+            return String::new();
+        }
+        let mut out = String::from("## Available Tools\n\n");
+        out.push_str("**CRITICAL**: You MUST use tools to perform actions. Do NOT pretend to execute commands or schedule tasks.\n\n");
+        for line in tool_summaries {
+            out.push_str(line);
+            out.push('\n');
+        }
+        out
+    }
+
+    fn load_bootstrap_files(&self) -> String {
+        let files = ["AGENTS.md", "SOUL.md", "USER.md", "IDENTITY.md"];
+        let mut out = String::new();
+        for name in files {
+            let path = self.workspace.join(name);
+            let content = std::fs::read_to_string(path).unwrap_or_default();
+            if content.is_empty() {
+                continue;
+            }
+            out.push_str(&format!("## {}\n\n{}\n\n", name, content));
+        }
+        out.trim().to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ContextBuilder;
+
+    #[test]
+    fn system_prompt_contains_skills_memory_and_tools() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let ws = tmp.path().to_path_buf();
+        std::fs::create_dir_all(ws.join("skills/demo")).expect("mkdir");
+        std::fs::write(
+            ws.join("skills/demo/SKILL.md"),
+            "---\nname: demo\ndescription: sample\n---\ncontent",
+        )
+        .expect("write skill");
+        std::fs::create_dir_all(ws.join("memory")).expect("mkdir");
+        std::fs::write(ws.join("memory/MEMORY.md"), "remember").expect("write memory");
+        std::fs::write(ws.join("AGENTS.md"), "agents cfg").expect("write bootstrap");
+
+        let cb = ContextBuilder::new(ws.clone());
+        let prompt = cb.build_system_prompt("telegram", "123", &["- tool a".to_string()]);
+        assert!(prompt.contains("<skills>"));
+        assert!(prompt.contains("Long-term Memory"));
+        assert!(prompt.contains("Available Tools"));
+        assert!(prompt.contains("AGENTS.md"));
+    }
+}

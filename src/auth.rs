@@ -1,18 +1,20 @@
-#![allow(dead_code)]
-#![allow(unused_variables)]
-#![allow(unused_imports)]
-#![allow(clippy::map_flatten)]
+//! Authentication credential store and basic auth flows.
 
-//! Authentication module - Full OAuth2 and credential management
-//! Ported from Go version
-
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs;
 use std::path::PathBuf;
 
-/// Credential store
+fn auth_home_dir() -> PathBuf {
+    if let Ok(path) = std::env::var("PICORS_HOME") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+    dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CredentialStore {
     pub credentials: HashMap<String, AuthCredential>,
@@ -36,76 +38,76 @@ impl AuthCredential {
             api_key: Some(token),
             access_token: None,
             refresh_token: None,
-            expires_at: expires_at
-                .map(|e| chrono::DateTime::from_timestamp(e, 0))
-                .flatten(),
+            expires_at: expires_at.and_then(|e| chrono::DateTime::from_timestamp(e, 0)),
             account_id: None,
             auth_method: "token".to_string(),
         }
     }
 
     pub fn is_expired(&self) -> bool {
-        if let Some(exp) = self.expires_at {
-            return exp < chrono::Utc::now();
-        }
-        false
+        self.expires_at
+            .map(|exp| exp < chrono::Utc::now())
+            .unwrap_or(false)
     }
 }
 
-/// Get credentials store path
-fn get_store_path() -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    home.join(".picoclaw").join("credentials.json")
+fn primary_store_path() -> PathBuf {
+    let home = auth_home_dir();
+    home.join(".picors").join("credentials.json")
 }
 
-/// Load credential store
-pub fn load_store() -> Result<CredentialStore> {
-    let path = get_store_path();
-    if !path.exists() {
-        return Ok(CredentialStore::default());
-    }
-    let content = fs::read_to_string(&path)?;
+fn legacy_store_path() -> PathBuf {
+    let home = auth_home_dir();
+    home.join(".picors").join("credentials.json")
+}
+
+fn load_store_from_path(path: &PathBuf) -> Result<CredentialStore> {
+    let content = std::fs::read_to_string(path)?;
     let store: CredentialStore = serde_json::from_str(&content)?;
     Ok(store)
 }
 
-/// Save credential store
+pub fn load_store() -> Result<CredentialStore> {
+    let primary = primary_store_path();
+    if primary.exists() {
+        return load_store_from_path(&primary);
+    }
+
+    // Fallback read from legacy location.
+    let legacy = legacy_store_path();
+    if legacy.exists() {
+        return load_store_from_path(&legacy);
+    }
+
+    Ok(CredentialStore::default())
+}
+
 fn save_store(store: &CredentialStore) -> Result<()> {
-    let path = get_store_path();
+    let path = primary_store_path();
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+        std::fs::create_dir_all(parent)?;
     }
     let content = serde_json::to_string_pretty(store)?;
-    fs::write(&path, content)?;
+    std::fs::write(path, content)?;
     Ok(())
 }
 
-/// Set credential for provider
 pub fn set_credential(provider: &str, cred: AuthCredential) -> Result<()> {
     let mut store = load_store()?;
     store.credentials.insert(provider.to_string(), cred);
     save_store(&store)
 }
 
-/// Get credential for provider
-pub fn get_credential(provider: &str) -> Result<Option<AuthCredential>> {
-    let store = load_store()?;
-    Ok(store.credentials.get(provider).cloned())
-}
-
-/// Delete credential for provider
 pub fn delete_credential(provider: &str) -> Result<()> {
     let mut store = load_store()?;
     store.credentials.remove(provider);
     save_store(&store)
 }
 
-/// Delete all credentials
 pub fn delete_all_credentials() -> Result<()> {
     save_store(&CredentialStore::default())
 }
 
-/// Show auth status
 pub fn show_status() -> Result<()> {
     let store = load_store()?;
 
@@ -122,29 +124,80 @@ pub fn show_status() -> Result<()> {
         } else {
             "active"
         };
-        println!("  {}: {} ({})", provider, cred.auth_method, status);
+        println!("  {provider}: {} ({status})", cred.auth_method);
     }
     Ok(())
 }
 
-/// Login to OpenAI (simplified - would need full OAuth2 implementation)
 pub fn login_openai(_device_code: bool) -> Result<()> {
-    // In full implementation, this would use OAuth2 device code flow
-    // For now, prompt user to enter API key
     println!("OpenAI login:");
     println!("1. Get API key from https://platform.openai.com/api-keys");
     println!("2. Run: picors auth login --provider openai --token <your-key>");
     Ok(())
 }
 
-/// Login with paste token
 pub fn login_paste_token(provider: &str) -> Result<()> {
-    println!("Enter {} API key: ", provider);
-    // In interactive mode, would read from stdin
-    // For now, just show instructions
-    println!(
-        "Usage: picors auth login --provider {} --token <token>",
-        provider
-    );
+    println!("Enter {provider} API key: ");
+    println!("Usage: picors auth login --provider {provider} --token <token>");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    static AUTH_TEST_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+
+    fn lock() -> std::sync::MutexGuard<'static, ()> {
+        AUTH_TEST_LOCK
+            .get_or_init(|| std::sync::Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+    }
+
+    #[test]
+    fn write_uses_picors_path() {
+        let _g = lock();
+        let home = tempfile::tempdir().expect("tmp home");
+        // SAFETY: guarded by lock for process-wide env mutation.
+        unsafe { std::env::set_var("PICORS_HOME", home.path()) };
+
+        let cred = AuthCredential::from_token("openai", "key-1".to_string(), None);
+        set_credential("openai", cred).expect("set cred");
+
+        assert!(home.path().join(".picors/credentials.json").exists());
+        assert!(!home.path().join(".picors/credentials.json").exists());
+    }
+
+    #[test]
+    fn fallback_reads_legacy_if_primary_missing() {
+        let _g = lock();
+        let home = tempfile::tempdir().expect("tmp home");
+        // SAFETY: guarded by lock for process-wide env mutation.
+        unsafe { std::env::set_var("PICORS_HOME", home.path()) };
+
+        let legacy_dir = home.path().join(".picors");
+        std::fs::create_dir_all(&legacy_dir).expect("mkdir legacy");
+        let mut creds = HashMap::new();
+        creds.insert(
+            "openai".to_string(),
+            AuthCredential::from_token("openai", "legacy".to_string(), None),
+        );
+        let store = CredentialStore { credentials: creds };
+        std::fs::write(
+            legacy_dir.join("credentials.json"),
+            serde_json::to_string_pretty(&store).expect("serialize"),
+        )
+        .expect("write");
+
+        let loaded = load_store().expect("load");
+        assert_eq!(
+            loaded
+                .credentials
+                .get("openai")
+                .and_then(|c| c.api_key.as_ref())
+                .map(|s| s.as_str()),
+            Some("legacy")
+        );
+    }
 }
