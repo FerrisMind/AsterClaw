@@ -17,6 +17,10 @@
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
 </p>
 
+## 🎬 Demo
+
+https://github.com/FerrisMind/AsterClaw/raw/main/res/demo.mp4
+
 ## ✨ What is AsterClaw?
 
 AsterClaw is an ultra-lightweight personal AI agent that runs as a local gateway, connects to LLM providers, and executes tools on your behalf. Built in Rust for maximum performance and minimal footprint.

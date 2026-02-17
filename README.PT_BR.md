@@ -10,6 +10,10 @@
   Porta Rust 2024 do PicoClaw com gateway funcional, canal Telegram, provedores OpenAI-compativeis e comando `migrate`.
 </p>
 
+## 🎬 Demo
+
+https://github.com/FerrisMind/AsterClaw/raw/main/res/demo.mp4
+
 ## 📚 Índice
 
 - [O que é AsterClaw?](#-o-que-é-asterclaw)

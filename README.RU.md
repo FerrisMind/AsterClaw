@@ -10,6 +10,10 @@
   Rust 2024 MVP-порт PicoClaw с работающим `gateway`, Telegram-каналом, OpenAI-совместимыми провайдерами и реальной командой `migrate`.
 </p>
 
+## 🎬 Демо
+
+https://github.com/FerrisMind/AsterClaw/raw/main/res/demo.mp4
+
 ## 📚 Содержание
 
 - [Что такое AsterClaw?](#-что-такое-asterclaw)
