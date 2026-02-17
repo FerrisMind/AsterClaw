@@ -34,6 +34,7 @@ struct HttpProvider {
     base_url: String,
     extra_headers: HashMap<String, String>,
     _kind: ProviderKind,
+    client: reqwest::Client,
 }
 
 impl HttpProvider {
@@ -43,11 +44,18 @@ impl HttpProvider {
         extra_headers: HashMap<String, String>,
         kind: ProviderKind,
     ) -> Self {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .pool_max_idle_per_host(4)
+            .build()
+            .unwrap_or_default();
         Self {
             api_key,
             base_url,
             extra_headers,
             _kind: kind,
+            client,
         }
     }
 
@@ -58,11 +66,6 @@ impl HttpProvider {
         tools: Option<&[ToolDefinition]>,
         options: &HashMap<String, serde_json::Value>,
     ) -> Result<LlmResponse> {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .connect_timeout(std::time::Duration::from_secs(10))
-            .build()
-            .unwrap_or_default();
         let messages_json: Vec<serde_json::Value> = messages
             .iter()
             .map(normalize_message_for_provider)
@@ -100,7 +103,8 @@ impl HttpProvider {
             body["max_tokens"] = max_tokens.clone();
         }
 
-        let mut req = client
+        let mut req = self
+            .client
             .post(format!("{}/chat/completions", self.base_url))
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json");

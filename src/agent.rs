@@ -468,25 +468,16 @@ impl AgentLoop {
         self.running.store(true, Ordering::SeqCst);
         let mut rx = self.bus.take_inbound_receiver()?;
 
-        while self.running.load(Ordering::SeqCst) {
-            tokio::select! {
-                msg = rx.recv() => {
-                    match msg {
-                        Some(msg) => {
-                            if let Err(err) = self.process_message(msg).await {
-                                tracing::error!("Error processing message: {}", err);
-                            }
-                        }
-                        None => {
-                            tracing::warn!("Inbound bus channel closed");
-                            break;
-                        }
-                    }
-                }
-                _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {}
+        while let Some(msg) = rx.recv().await {
+            if !self.running.load(Ordering::SeqCst) {
+                break;
+            }
+            if let Err(err) = self.process_message(msg).await {
+                tracing::error!("Error processing message: {}", err);
             }
         }
 
+        tracing::info!("Agent loop stopped");
         Ok(())
     }
 

@@ -131,6 +131,17 @@ impl ContextBuilder {
             out.push_str(line);
             out.push('\n');
         }
+        // Web research workflow guidance
+        out.push_str(concat!(
+            "\n### Web Research Workflow\n\n",
+            "When you need current or external information, follow this pattern:\n",
+            "1. **Search first** — call `web_search` with a focused query to get titles, URLs, and snippets.\n",
+            "2. **Evaluate snippets** — if the snippets answer the question, respond directly.\n",
+            "3. **Fetch selectively** — if you need more detail, call `web_fetch` on the 1-2 most relevant URLs.\n",
+            "4. **Synthesize** — combine the fetched content into your answer, citing sources.\n\n",
+            "Do NOT skip straight to `web_fetch` without first searching — you need URLs to fetch.\n",
+            "Do NOT fetch all results — only the most relevant ones to stay within context limits.\n",
+        ));
         out
     }
 
@@ -173,5 +184,6 @@ mod tests {
         assert!(prompt.contains("Long-term Memory"));
         assert!(prompt.contains("Available Tools"));
         assert!(prompt.contains("AGENTS.md"));
+        assert!(prompt.contains("Web Research Workflow"));
     }
 }
