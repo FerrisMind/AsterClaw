@@ -1,11 +1,5 @@
-//! Configuration module for AsterClaw
-//! Ported from Go version
-
-use std::path::{Path, PathBuf};
-
 use serde::{Deserialize, Serialize};
-
-/// Main configuration structure
+use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
     #[serde(default)]
@@ -25,15 +19,11 @@ pub struct Config {
     #[serde(default)]
     pub devices: DevicesConfig,
 }
-
-/// Agent configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AgentsConfig {
     #[serde(default)]
     pub defaults: AgentDefaults,
 }
-
-/// Agent defaults
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentDefaults {
     #[serde(default = "default_workspace")]
@@ -51,7 +41,6 @@ pub struct AgentDefaults {
     #[serde(default = "default_max_tool_iterations")]
     pub max_tool_iterations: i32,
 }
-
 impl Default for AgentDefaults {
     fn default() -> Self {
         Self {
@@ -65,38 +54,29 @@ impl Default for AgentDefaults {
         }
     }
 }
-
 fn default_workspace() -> String {
     "~/.asterclaw/workspace".to_string()
 }
-
 fn default_true() -> bool {
     true
 }
-
 fn default_model() -> String {
     "glm-4.7".to_string()
 }
-
 fn default_max_tokens() -> i32 {
     8192
 }
-
 fn default_temperature() -> f64 {
     0.7
 }
-
 fn default_max_tool_iterations() -> i32 {
     20
 }
-
-/// Channels configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ChannelsConfig {
     #[serde(default)]
     pub telegram: TelegramConfig,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TelegramConfig {
     #[serde(default)]
@@ -108,8 +88,6 @@ pub struct TelegramConfig {
     #[serde(default)]
     pub allow_from: Vec<String>,
 }
-
-/// Providers configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProvidersConfig {
     #[serde(default)]
@@ -127,7 +105,6 @@ pub struct ProvidersConfig {
     #[serde(default)]
     pub deepseek: ProviderConfig,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProviderConfig {
     #[serde(default)]
@@ -141,8 +118,6 @@ pub struct ProviderConfig {
     #[serde(default)]
     pub connect_mode: Option<String>,
 }
-
-/// Gateway configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GatewayConfig {
     #[serde(default = "default_gateway_host")]
@@ -150,7 +125,6 @@ pub struct GatewayConfig {
     #[serde(default = "default_gateway_port")]
     pub port: i32,
 }
-
 impl Default for GatewayConfig {
     fn default() -> Self {
         Self {
@@ -159,16 +133,12 @@ impl Default for GatewayConfig {
         }
     }
 }
-
 fn default_gateway_host() -> String {
     "127.0.0.1".to_string()
 }
-
 fn default_gateway_port() -> i32 {
     18790
 }
-
-/// Runtime configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeConfig {
     #[serde(default = "default_runtime_worker_threads")]
@@ -176,7 +146,6 @@ pub struct RuntimeConfig {
     #[serde(default = "default_runtime_max_blocking_threads")]
     pub max_blocking_threads: usize,
 }
-
 impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
@@ -185,16 +154,12 @@ impl Default for RuntimeConfig {
         }
     }
 }
-
 fn default_runtime_worker_threads() -> usize {
     2
 }
-
 fn default_runtime_max_blocking_threads() -> usize {
     16
 }
-
-/// Tools configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolsConfig {
     #[serde(default)]
@@ -204,7 +169,6 @@ pub struct ToolsConfig {
     #[serde(default = "default_tool_output_max_chars")]
     pub tool_output_max_chars: usize,
 }
-
 impl Default for ToolsConfig {
     fn default() -> Self {
         Self {
@@ -214,7 +178,6 @@ impl Default for ToolsConfig {
         }
     }
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebToolsConfig {
     #[serde(default)]
@@ -228,7 +191,6 @@ pub struct WebToolsConfig {
     #[serde(default = "default_web_fetch_hard_max_bytes")]
     pub fetch_hard_max_bytes: usize,
 }
-
 impl Default for WebToolsConfig {
     fn default() -> Self {
         Self {
@@ -240,7 +202,6 @@ impl Default for WebToolsConfig {
         }
     }
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BraveConfig {
     #[serde(default)]
@@ -250,7 +211,6 @@ pub struct BraveConfig {
     #[serde(default = "default_max_results")]
     pub max_results: i32,
 }
-
 impl Default for BraveConfig {
     fn default() -> Self {
         Self {
@@ -260,7 +220,6 @@ impl Default for BraveConfig {
         }
     }
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DuckDuckGoConfig {
     #[serde(default = "default_true_duck")]
@@ -268,7 +227,6 @@ pub struct DuckDuckGoConfig {
     #[serde(default = "default_max_results")]
     pub max_results: i32,
 }
-
 impl Default for DuckDuckGoConfig {
     fn default() -> Self {
         Self {
@@ -277,7 +235,6 @@ impl Default for DuckDuckGoConfig {
         }
     }
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecToolsConfig {
     #[serde(default = "default_true")]
@@ -293,7 +250,6 @@ pub struct ExecToolsConfig {
     #[serde(default = "default_exec_stderr_max_bytes")]
     pub stderr_max_bytes: usize,
 }
-
 impl Default for ExecToolsConfig {
     fn default() -> Self {
         Self {
@@ -306,7 +262,6 @@ impl Default for ExecToolsConfig {
         }
     }
 }
-
 fn default_exec_auto_allow_prefixes() -> Vec<String> {
     [
         "ls",
@@ -347,7 +302,6 @@ fn default_exec_auto_allow_prefixes() -> Vec<String> {
     .map(|s| s.to_string())
     .collect()
 }
-
 fn default_exec_require_confirm_prefixes() -> Vec<String> {
     [
         "git commit",
@@ -383,7 +337,6 @@ fn default_exec_require_confirm_prefixes() -> Vec<String> {
     .map(|s| s.to_string())
     .collect()
 }
-
 fn default_exec_always_deny_prefixes() -> Vec<String> {
     [
         "powershell",
@@ -405,40 +358,30 @@ fn default_exec_always_deny_prefixes() -> Vec<String> {
     .map(|s| s.to_string())
     .collect()
 }
-
 fn default_exec_stdout_max_bytes() -> usize {
     256 * 1024
 }
-
 fn default_exec_stderr_max_bytes() -> usize {
     256 * 1024
 }
-
 fn default_tool_output_max_chars() -> usize {
     200_000
 }
-
 fn default_web_fetch_default_max_chars() -> usize {
     120_000
 }
-
 fn default_web_fetch_hard_max_chars() -> usize {
     200_000
 }
-
 fn default_web_fetch_hard_max_bytes() -> usize {
     1_000_000
 }
-
 fn default_max_results() -> i32 {
     5
 }
-
 fn default_true_duck() -> bool {
     true
 }
-
-/// Heartbeat configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HeartbeatConfig {
     #[serde(default = "default_true")]
@@ -446,7 +389,6 @@ pub struct HeartbeatConfig {
     #[serde(default = "default_interval")]
     pub interval: i32,
 }
-
 impl Default for HeartbeatConfig {
     fn default() -> Self {
         Self {
@@ -455,11 +397,9 @@ impl Default for HeartbeatConfig {
         }
     }
 }
-
 fn default_interval() -> i32 {
     30
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DevicesConfig {
     #[serde(default)]
@@ -467,7 +407,6 @@ pub struct DevicesConfig {
     #[serde(default = "default_true")]
     pub monitor_usb: bool,
 }
-
 impl Default for DevicesConfig {
     fn default() -> Self {
         Self {
@@ -476,19 +415,14 @@ impl Default for DevicesConfig {
         }
     }
 }
-
-/// Get the config path (~/.asterclaw/config.json)
 pub fn get_config_path() -> anyhow::Result<PathBuf> {
     let home = resolve_home_dir()?;
     Ok(home.join(".asterclaw").join("config.json"))
 }
-
-/// Get legacy config path (~/.picoclaw/config.json).
 pub fn get_legacy_config_path() -> anyhow::Result<PathBuf> {
     let home = resolve_home_dir()?;
     Ok(home.join(".picoclaw").join("config.json"))
 }
-
 fn resolve_home_dir() -> anyhow::Result<PathBuf> {
     if let Ok(path) = std::env::var("ASTERCLAW_HOME") {
         let trimmed = path.trim();
@@ -498,35 +432,26 @@ fn resolve_home_dir() -> anyhow::Result<PathBuf> {
     }
     dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot find home directory"))
 }
-
-/// Load config from file
 pub fn load_config(path: &Path) -> anyhow::Result<Config> {
     if path.exists() {
         let data = std::fs::read_to_string(path)?;
         let config: Config = parse_compat_json(&data)?;
         return Ok(config);
     }
-
-    // Dual compatibility mode: fall back to legacy ~/.picoclaw/config.json
     let legacy = get_legacy_config_path()?;
     if legacy.exists() {
         let data = std::fs::read_to_string(&legacy)?;
         let config: Config = parse_compat_json(&data)?;
         return Ok(config);
     }
-
     Ok(Config::default())
 }
-
-/// Save config to file
 pub fn save_config(path: &Path, config: &Config) -> anyhow::Result<()> {
     let dir = path
         .parent()
         .ok_or_else(|| anyhow::anyhow!("Invalid path"))?;
     std::fs::create_dir_all(dir)?;
-
     let data = serde_json::to_string_pretty(config)?;
-    // Atomic write via temp file — config may contain API keys.
     let temp = tempfile::NamedTempFile::new_in(dir)?;
     std::fs::write(temp.path(), &data)?;
     #[cfg(unix)]
@@ -537,15 +462,11 @@ pub fn save_config(path: &Path, config: &Config) -> anyhow::Result<()> {
     temp.persist(path)?;
     Ok(())
 }
-
 impl Config {
-    /// Get workspace path with ~ expansion
     pub fn workspace_path(&self) -> PathBuf {
         expand_home(&self.agents.defaults.workspace)
     }
 }
-
-/// Expand ~ to home directory (respects `ASTERCLAW_HOME` env var).
 fn expand_home(path: &str) -> PathBuf {
     if path.starts_with('~')
         && let Ok(home) = resolve_home_dir()
@@ -557,7 +478,6 @@ fn expand_home(path: &str) -> PathBuf {
     }
     PathBuf::from(path)
 }
-
 fn parse_compat_json(data: &str) -> anyhow::Result<Config> {
     let value: serde_json::Value = serde_json::from_str(data)?;
     let normalized = normalize_keys(value);
@@ -565,14 +485,12 @@ fn parse_compat_json(data: &str) -> anyhow::Result<Config> {
     config.agents.defaults.workspace = normalize_workspace_path(&config.agents.defaults.workspace);
     Ok(config)
 }
-
 fn normalize_workspace_path(workspace: &str) -> String {
     workspace
         .replace(".picors", ".asterclaw")
         .replace(".femtors", ".asterclaw")
         .replace(".picoclaw", ".asterclaw")
 }
-
 fn normalize_keys(value: serde_json::Value) -> serde_json::Value {
     match value {
         serde_json::Value::Object(map) => {
@@ -588,7 +506,6 @@ fn normalize_keys(value: serde_json::Value) -> serde_json::Value {
         other => other,
     }
 }
-
 fn camel_to_snake(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let chars: Vec<char> = input.chars().collect();
@@ -611,11 +528,9 @@ fn camel_to_snake(input: &str) -> String {
     }
     out
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn loads_camel_case_legacy_keys() {
         let raw = r#"{
@@ -626,7 +541,6 @@ mod tests {
         assert_eq!(parsed.agents.defaults.max_tool_iterations, 7);
         assert!(!parsed.devices.monitor_usb);
     }
-
     #[test]
     fn rewrites_legacy_workspace_brands_to_asterclaw() {
         let raw = r#"{
@@ -634,7 +548,6 @@ mod tests {
         }"#;
         let parsed = parse_compat_json(raw).expect("parse");
         assert_eq!(parsed.agents.defaults.workspace, "~/.asterclaw/workspace");
-
         let raw_femtors = r#"{
             "agents": { "defaults": { "workspace": "~/.femtors/workspace" } }
         }"#;
@@ -644,7 +557,6 @@ mod tests {
             "~/.asterclaw/workspace"
         );
     }
-
     #[test]
     fn loads_exec_tool_policy_from_config() {
         let raw = r#"{
@@ -670,7 +582,6 @@ mod tests {
         assert_eq!(parsed.tools.exec.stdout_max_bytes, 12345);
         assert_eq!(parsed.tools.exec.stderr_max_bytes, 23456);
     }
-
     #[test]
     fn loads_tool_limits_from_config() {
         let raw = r#"{
@@ -689,7 +600,6 @@ mod tests {
         assert_eq!(parsed.tools.web.fetch_hard_max_chars, 22222);
         assert_eq!(parsed.tools.web.fetch_hard_max_bytes, 33333);
     }
-
     #[test]
     fn loads_runtime_config_from_config() {
         let raw = r#"{

@@ -1,10 +1,5 @@
-//! Provider types for LLM integrations
-//! Ported from Go version
-
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-
-/// Tool call from LLM
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCall {
     pub id: String,
@@ -17,15 +12,11 @@ pub struct ToolCall {
     #[serde(default)]
     pub arguments: Option<HashMap<String, serde_json::Value>>,
 }
-
-/// Function call in tool call
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionCall {
     pub name: String,
     pub arguments: String,
 }
-
-/// LLM response
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmResponse {
     pub content: String,
@@ -36,16 +27,12 @@ pub struct LlmResponse {
     #[serde(default)]
     pub usage: Option<UsageInfo>,
 }
-
-/// Usage information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageInfo {
     pub prompt_tokens: i32,
     pub completion_tokens: i32,
     pub total_tokens: i32,
 }
-
-/// Chat message
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     pub role: String,
@@ -55,7 +42,6 @@ pub struct Message {
     #[serde(default)]
     pub tool_call_id: Option<String>,
 }
-
 impl Message {
     pub fn user(content: &str) -> Self {
         Self {
@@ -65,7 +51,6 @@ impl Message {
             tool_call_id: None,
         }
     }
-
     pub fn system(content: &str) -> Self {
         Self {
             role: "system".to_string(),
@@ -74,7 +59,6 @@ impl Message {
             tool_call_id: None,
         }
     }
-
     pub fn tool(content: &str, tool_call_id: &str) -> Self {
         Self {
             role: "tool".to_string(),
@@ -84,16 +68,12 @@ impl Message {
         }
     }
 }
-
-/// Tool definition for function calling
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolDefinition {
     #[serde(rename = "type")]
     pub tool_type: String,
     pub function: ToolFunctionDefinition,
 }
-
-/// Tool function definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolFunctionDefinition {
     pub name: String,
@@ -101,22 +81,17 @@ pub struct ToolFunctionDefinition {
     #[serde(default)]
     pub parameters: serde_json::Value,
 }
-
 impl ToolFunctionDefinition {
     pub fn name(&self) -> &str {
         &self.name
     }
-
     pub fn description(&self) -> &str {
         &self.description
     }
-
     pub fn parameters(&self) -> serde_json::Value {
         self.parameters.clone()
     }
 }
-
-/// Process options for message processing
 #[derive(Debug, Clone)]
 pub struct ProcessOptions {
     pub session_key: String,
@@ -127,7 +102,6 @@ pub struct ProcessOptions {
     pub enable_summary: bool,
     pub no_history: bool,
 }
-
 impl Default for ProcessOptions {
     fn default() -> Self {
         Self {

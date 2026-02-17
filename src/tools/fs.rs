@@ -1,20 +1,12 @@
-//! Filesystem tools: read_file, write_file, list_dir, edit_file, append_file.
-
-use std::collections::HashMap;
-use std::path::PathBuf;
-
+use super::{Tool, ToolResult, arg_string, ensure_within_workspace, resolve_path};
 use async_trait::async_trait;
 use serde_json::Value;
-
-use super::{Tool, ToolResult, arg_string, ensure_within_workspace, resolve_path};
-
-// ── ReadFileTool ────────────────────────────────────────────────────────
-
+use std::collections::HashMap;
+use std::path::PathBuf;
 pub struct ReadFileTool {
     workspace: PathBuf,
     restrict: bool,
 }
-
 impl ReadFileTool {
     pub fn new(workspace: PathBuf, restrict: bool) -> Self {
         Self {
@@ -23,7 +15,6 @@ impl ReadFileTool {
         }
     }
 }
-
 #[async_trait]
 impl Tool for ReadFileTool {
     fn name(&self) -> &str {
@@ -41,7 +32,6 @@ impl Tool for ReadFileTool {
             "required": ["path"]
         })
     }
-
     async fn execute(&self, args: HashMap<String, Value>, _: &str, _: &str) -> ToolResult {
         let path = match arg_string(&args, "path") {
             Some(v) if !v.is_empty() => v,
@@ -53,21 +43,16 @@ impl Tool for ReadFileTool {
         {
             return ToolResult::error(&err);
         }
-
         match std::fs::read_to_string(&file_path) {
             Ok(content) => ToolResult::new(&content),
             Err(e) => ToolResult::error(&format!("Failed to read file: {}", e)),
         }
     }
 }
-
-// ── WriteFileTool ───────────────────────────────────────────────────────
-
 pub struct WriteFileTool {
     workspace: PathBuf,
     restrict: bool,
 }
-
 impl WriteFileTool {
     pub fn new(workspace: PathBuf, restrict: bool) -> Self {
         Self {
@@ -76,7 +61,6 @@ impl WriteFileTool {
         }
     }
 }
-
 #[async_trait]
 impl Tool for WriteFileTool {
     fn name(&self) -> &str {
@@ -95,27 +79,23 @@ impl Tool for WriteFileTool {
             "required": ["path", "content"]
         })
     }
-
     async fn execute(&self, args: HashMap<String, Value>, _: &str, _: &str) -> ToolResult {
         let path = match arg_string(&args, "path") {
             Some(v) if !v.is_empty() => v,
             _ => return ToolResult::error("Missing required parameter: path"),
         };
         let content = arg_string(&args, "content").unwrap_or_default();
-
         let file_path = resolve_path(&self.workspace, &path);
         if self.restrict
             && let Err(err) = ensure_within_workspace(&self.workspace, &file_path, true)
         {
             return ToolResult::error(&err);
         }
-
         if let Some(parent) = file_path.parent()
             && let Err(e) = std::fs::create_dir_all(parent)
         {
             return ToolResult::error(&format!("Failed to create parent directory: {}", e));
         }
-
         match std::fs::write(&file_path, content) {
             Ok(_) => ToolResult::new(&format!(
                 "File written successfully: {}",
@@ -125,14 +105,10 @@ impl Tool for WriteFileTool {
         }
     }
 }
-
-// ── ListDirTool ─────────────────────────────────────────────────────────
-
 pub struct ListDirTool {
     workspace: PathBuf,
     restrict: bool,
 }
-
 impl ListDirTool {
     pub fn new(workspace: PathBuf, restrict: bool) -> Self {
         Self {
@@ -141,7 +117,6 @@ impl ListDirTool {
         }
     }
 }
-
 #[async_trait]
 impl Tool for ListDirTool {
     fn name(&self) -> &str {
@@ -158,22 +133,18 @@ impl Tool for ListDirTool {
             }
         })
     }
-
     async fn execute(&self, args: HashMap<String, Value>, _: &str, _: &str) -> ToolResult {
         let path = arg_string(&args, "path").unwrap_or_else(|| ".".to_string());
         let dir_path = resolve_path(&self.workspace, &path);
-
         if self.restrict
             && let Err(err) = ensure_within_workspace(&self.workspace, &dir_path, false)
         {
             return ToolResult::error(&err);
         }
-
         let entries = match std::fs::read_dir(&dir_path) {
             Ok(v) => v,
             Err(e) => return ToolResult::error(&format!("Failed to read directory: {}", e)),
         };
-
         let mut lines = Vec::new();
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
@@ -188,14 +159,10 @@ impl Tool for ListDirTool {
         ToolResult::new(&lines.join("\n"))
     }
 }
-
-// ── EditFileTool ────────────────────────────────────────────────────────
-
 pub struct EditFileTool {
     workspace: PathBuf,
     restrict: bool,
 }
-
 impl EditFileTool {
     pub fn new(workspace: PathBuf, restrict: bool) -> Self {
         Self {
@@ -204,7 +171,6 @@ impl EditFileTool {
         }
     }
 }
-
 #[async_trait]
 impl Tool for EditFileTool {
     fn name(&self) -> &str {
@@ -226,7 +192,6 @@ impl Tool for EditFileTool {
             "required": ["path", "old_text", "new_text"]
         })
     }
-
     async fn execute(&self, args: HashMap<String, Value>, _: &str, _: &str) -> ToolResult {
         let path = match arg_string(&args, "path") {
             Some(v) if !v.is_empty() => v,
@@ -241,23 +206,19 @@ impl Tool for EditFileTool {
             Some(v) => v,
             None => return ToolResult::error("Missing required parameter: new_text"),
         };
-
         let file_path = resolve_path(&self.workspace, &path);
         if self.restrict
             && let Err(err) = ensure_within_workspace(&self.workspace, &file_path, false)
         {
             return ToolResult::error(&err);
         }
-
         let content = match std::fs::read_to_string(&file_path) {
             Ok(v) => v,
             Err(e) => return ToolResult::error(&format!("Failed to read file: {}", e)),
         };
-
         if !content.contains(&old_text) {
             return ToolResult::error("old_text not found in file. Make sure it matches exactly");
         }
-
         let count = content.matches(&old_text).count();
         if count > 1 {
             return ToolResult::error(&format!(
@@ -265,7 +226,6 @@ impl Tool for EditFileTool {
                 count
             ));
         }
-
         let updated = content.replacen(&old_text, &new_text, 1);
         match std::fs::write(&file_path, updated) {
             Ok(_) => ToolResult {
@@ -278,14 +238,10 @@ impl Tool for EditFileTool {
         }
     }
 }
-
-// ── AppendFileTool ──────────────────────────────────────────────────────
-
 pub struct AppendFileTool {
     workspace: PathBuf,
     restrict: bool,
 }
-
 impl AppendFileTool {
     pub fn new(workspace: PathBuf, restrict: bool) -> Self {
         Self {
@@ -294,7 +250,6 @@ impl AppendFileTool {
         }
     }
 }
-
 #[async_trait]
 impl Tool for AppendFileTool {
     fn name(&self) -> &str {
@@ -313,27 +268,23 @@ impl Tool for AppendFileTool {
             "required": ["path", "content"]
         })
     }
-
     async fn execute(&self, args: HashMap<String, Value>, _: &str, _: &str) -> ToolResult {
         let path = match arg_string(&args, "path") {
             Some(v) if !v.is_empty() => v,
             _ => return ToolResult::error("Missing required parameter: path"),
         };
         let content = arg_string(&args, "content").unwrap_or_default();
-
         let file_path = resolve_path(&self.workspace, &path);
         if self.restrict
             && let Err(err) = ensure_within_workspace(&self.workspace, &file_path, true)
         {
             return ToolResult::error(&err);
         }
-
         if let Some(parent) = file_path.parent()
             && let Err(e) = std::fs::create_dir_all(parent)
         {
             return ToolResult::error(&format!("Failed to create parent directory: {}", e));
         }
-
         match std::fs::OpenOptions::new()
             .append(true)
             .create(true)

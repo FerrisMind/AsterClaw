@@ -1,5 +1,6 @@
-//! Communication channel integrations.
-
+use crate::bus::{InboundMessage, MessageBus, OutboundMessage};
+use crate::config::Config;
+use crate::voice::GroqTranscriber;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -9,24 +10,17 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::task::JoinHandle;
-
-use crate::bus::{InboundMessage, MessageBus, OutboundMessage};
-use crate::config::Config;
-use crate::voice::GroqTranscriber;
-
 #[async_trait]
 pub trait Channel: Send + Sync {
     async fn start(&self) -> Result<()>;
     async fn stop(&self) -> Result<()>;
     async fn send(&self, msg: &OutboundMessage) -> Result<()>;
 }
-
 #[derive(Debug)]
 struct BaseChannel {
     allow_list: Vec<String>,
     running: AtomicBool,
 }
-
 impl BaseChannel {
     fn new(allow_list: Vec<String>) -> Self {
         Self {
@@ -34,16 +28,13 @@ impl BaseChannel {
             running: AtomicBool::new(false),
         }
     }
-
     fn is_running(&self) -> bool {
         self.running.load(Ordering::SeqCst)
     }
-
     fn set_running(&self, running: bool) {
         self.running.store(running, Ordering::SeqCst);
     }
 }
-
 fn split_compound_sender(sender: &str) -> (&str, &str) {
     if let Some(idx) = sender.find('|') {
         (&sender[..idx], &sender[idx + 1..])
@@ -51,7 +42,6 @@ fn split_compound_sender(sender: &str) -> (&str, &str) {
         (sender, "")
     }
 }
-
 fn is_allowed_sender(allow_list: &[String], sender_id: &str) -> bool {
     if allow_list.is_empty() {
         return true;
@@ -60,7 +50,6 @@ fn is_allowed_sender(allow_list: &[String], sender_id: &str) -> bool {
     for allowed in allow_list {
         let trimmed = allowed.trim_start_matches('@');
         let (allowed_id, allowed_user) = split_compound_sender(trimmed);
-
         if sender_id == allowed
             || sender_id == trimmed
             || id_part == allowed
@@ -75,7 +64,6 @@ fn is_allowed_sender(allow_list: &[String], sender_id: &str) -> bool {
     }
     false
 }
-
 struct TelegramChannel {
     base: BaseChannel,
     token: String,
@@ -84,7 +72,6 @@ struct TelegramChannel {
     transcriber: Option<GroqTranscriber>,
     task: Mutex<Option<JoinHandle<()>>>,
 }
-
 impl TelegramChannel {
     fn new(cfg: &Config, bus: Arc<MessageBus>) -> Result<Self> {
         let telegram = &cfg.channels.telegram;
@@ -113,11 +100,9 @@ impl TelegramChannel {
             task: Mutex::new(None),
         })
     }
-
     fn api_url(&self, method: &str) -> String {
         format!("https://api.telegram.org/bot{}/{}", self.token, method)
     }
-
     async fn send_message_impl(
         client: &Client,
         url: &str,
@@ -132,7 +117,6 @@ impl TelegramChannel {
         if let Some(mode) = parse_mode {
             payload["parse_mode"] = serde_json::json!(mode);
         }
-
         let resp = client.post(url).json(&payload).send().await?;
         if !resp.status().is_success() {
             let body = resp.text().await.unwrap_or_default();
@@ -141,14 +125,12 @@ impl TelegramChannel {
         Ok(())
     }
 }
-
 #[async_trait]
 impl Channel for TelegramChannel {
     async fn start(&self) -> Result<()> {
         if self.base.is_running() {
             return Ok(());
         }
-
         self.base.set_running(true);
         let token = self.token.clone();
         let bus = self.bus.clone();
@@ -157,14 +139,12 @@ impl Channel for TelegramChannel {
         let transcriber = self.transcriber.clone();
         let running = Arc::new(AtomicBool::new(true));
         let running_ref = running.clone();
-
         let handle = tokio::spawn(async move {
             let mut offset: i64 = 0;
             loop {
                 if !running_ref.load(Ordering::SeqCst) {
                     break;
                 }
-
                 let url = format!(
                     "https://api.telegram.org/bot{}/getUpdates?timeout=10&offset={}",
                     token, offset
@@ -181,7 +161,6 @@ impl Channel for TelegramChannel {
                                     if !is_allowed_sender(&allow_list, &sender_id) {
                                         continue;
                                     }
-
                                     let (content, media) = build_message_content_with_media(
                                         &client,
                                         &token,
@@ -192,7 +171,6 @@ impl Channel for TelegramChannel {
                                     if content.is_empty() {
                                         continue;
                                     }
-
                                     let chat_id = msg.chat.id.to_string();
                                     let inbound = InboundMessage {
                                         channel: "telegram".to_string(),
@@ -219,15 +197,12 @@ impl Channel for TelegramChannel {
                     }
                     Err(err) => tracing::warn!("telegram polling request failed: {}", err),
                 }
-
                 tokio::time::sleep(tokio::time::Duration::from_millis(400)).await;
             }
         });
-
         *self.task.lock() = Some(handle);
         Ok(())
     }
-
     async fn stop(&self) -> Result<()> {
         self.base.set_running(false);
         if let Some(handle) = self.task.lock().take() {
@@ -235,11 +210,9 @@ impl Channel for TelegramChannel {
         }
         Ok(())
     }
-
     async fn send(&self, msg: &OutboundMessage) -> Result<()> {
         let html = markdown_to_telegram_html(&msg.content);
         let send_url = self.api_url("sendMessage");
-
         if let Err(err) =
             Self::send_message_impl(&self.client, &send_url, &msg.chat_id, &html, Some("HTML"))
                 .await
@@ -251,19 +224,16 @@ impl Channel for TelegramChannel {
         Ok(())
     }
 }
-
 #[derive(Deserialize)]
 struct TelegramGetUpdatesResponse {
     ok: bool,
     result: Vec<TelegramUpdate>,
 }
-
 #[derive(Deserialize)]
 struct TelegramUpdate {
     update_id: i64,
     message: Option<TelegramMessage>,
 }
-
 #[derive(Deserialize)]
 struct TelegramMessage {
     chat: TelegramChat,
@@ -275,44 +245,36 @@ struct TelegramMessage {
     video_note: Option<serde_json::Value>,
     document: Option<TelegramDocument>,
 }
-
 #[derive(Deserialize)]
 struct TelegramChat {
     id: i64,
 }
-
 #[derive(Deserialize)]
 struct TelegramUser {
     id: i64,
     username: Option<String>,
 }
-
 #[derive(Deserialize)]
 struct TelegramVoice {
     file_id: String,
 }
-
 #[derive(Deserialize)]
 struct TelegramAudio {
     file_id: String,
 }
-
 #[derive(Deserialize)]
 struct TelegramDocument {
     file_id: String,
 }
-
 #[derive(Deserialize)]
 struct TelegramGetFileResponse {
     ok: bool,
     result: Option<TelegramFile>,
 }
-
 #[derive(Deserialize)]
 struct TelegramFile {
     file_path: Option<String>,
 }
-
 fn build_sender_id(msg: &TelegramMessage) -> String {
     if let Some(from) = &msg.from {
         if let Some(username) = &from.username {
@@ -322,7 +284,6 @@ fn build_sender_id(msg: &TelegramMessage) -> String {
     }
     "unknown".to_string()
 }
-
 async fn build_message_content_with_media(
     client: &Client,
     token: &str,
@@ -331,7 +292,6 @@ async fn build_message_content_with_media(
 ) -> (String, Option<Vec<String>>) {
     let mut content = String::new();
     let mut media_paths = Vec::new();
-
     if let Some(text) = &msg.text {
         content.push_str(text);
     }
@@ -341,7 +301,6 @@ async fn build_message_content_with_media(
         }
         content.push_str(caption);
     }
-
     if let Some(voice) = &msg.voice
         && let Some(path) = download_telegram_file(client, token, &voice.file_id, ".ogg").await
     {
@@ -366,7 +325,6 @@ async fn build_message_content_with_media(
         };
         content.push_str(&voice_text);
     }
-
     if let Some(audio) = &msg.audio
         && let Some(path) = download_telegram_file(client, token, &audio.file_id, ".mp3").await
     {
@@ -376,7 +334,6 @@ async fn build_message_content_with_media(
         }
         content.push_str("[audio]");
     }
-
     if let Some(doc) = &msg.document
         && let Some(path) = download_telegram_file(client, token, &doc.file_id, "").await
     {
@@ -386,7 +343,6 @@ async fn build_message_content_with_media(
         }
         content.push_str("[file]");
     }
-
     if content.is_empty() {
         if msg.video_note.is_some() {
             content = "[video note unsupported in MVP]".to_string();
@@ -396,7 +352,6 @@ async fn build_message_content_with_media(
             content = "[empty message]".to_string();
         }
     }
-
     let media = if media_paths.is_empty() {
         None
     } else {
@@ -404,7 +359,6 @@ async fn build_message_content_with_media(
     };
     (content, media)
 }
-
 async fn download_telegram_file(
     client: &Client,
     token: &str,
@@ -434,7 +388,6 @@ async fn download_telegram_file(
     std::fs::write(&local_path, bytes).ok()?;
     Some(local_path.to_string_lossy().to_string())
 }
-
 fn resolve_transcriber(cfg: &Config) -> Option<GroqTranscriber> {
     let key = cfg
         .providers
@@ -449,17 +402,13 @@ fn resolve_transcriber(cfg: &Config) -> Option<GroqTranscriber> {
         });
     key.map(GroqTranscriber::new)
 }
-
 fn markdown_to_telegram_html(input: &str) -> String {
     let mut out = String::with_capacity(input.len() * 2);
     let mut in_code_block = false;
     let mut code_block_buf = String::new();
-
     for line in input.lines() {
-        // Handle fenced code blocks
         if line.trim_start().starts_with("```") {
             if in_code_block {
-                // closing
                 let escaped = html_escape(&code_block_buf);
                 out.push_str("<pre>");
                 out.push_str(&escaped);
@@ -479,8 +428,6 @@ fn markdown_to_telegram_html(input: &str) -> String {
             code_block_buf.push_str(line);
             continue;
         }
-
-        // Headers → bold text
         let trimmed = line.trim_start();
         if let Some(rest) = trimmed
             .strip_prefix("### ")
@@ -492,16 +439,12 @@ fn markdown_to_telegram_html(input: &str) -> String {
             out.push_str("</b>\n");
             continue;
         }
-
-        // Blockquotes
         if let Some(rest) = trimmed.strip_prefix("> ") {
             out.push_str("▎ <i>");
             out.push_str(&convert_inline(&html_escape(rest)));
             out.push_str("</i>\n");
             continue;
         }
-
-        // Bullet lists: - or * → •
         if let Some(rest) = trimmed
             .strip_prefix("- ")
             .or_else(|| trimmed.strip_prefix("* "))
@@ -511,33 +454,22 @@ fn markdown_to_telegram_html(input: &str) -> String {
             out.push('\n');
             continue;
         }
-
-        // Regular line
         out.push_str(&convert_inline(&html_escape(line)));
         out.push('\n');
     }
-
-    // Unclosed code block
     if in_code_block && !code_block_buf.is_empty() {
         out.push_str("<pre>");
         out.push_str(&html_escape(&code_block_buf));
         out.push_str("</pre>\n");
     }
-
-    // Trim trailing whitespace
     out.trim_end().to_string()
 }
-
 fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
 }
-
-/// Convert inline markdown patterns to Telegram HTML.
-/// Operates on already-HTML-escaped text.
 fn convert_inline(s: &str) -> String {
-    // Links first: [text](url) → <a href="url">text</a>
     let s = convert_links(s);
     let s = convert_pattern(&s, "**", "<b>", "</b>");
     let s = convert_pattern(&s, "__", "<u>", "</u>");
@@ -546,8 +478,6 @@ fn convert_inline(s: &str) -> String {
     let s = convert_pattern(&s, "_", "<i>", "</i>");
     convert_inline_code(&s)
 }
-
-/// Convert markdown links [text](url) to HTML <a> tags.
 fn convert_links(input: &str) -> String {
     let mut result = String::with_capacity(input.len());
     let mut rest = input;
@@ -570,13 +500,10 @@ fn convert_links(input: &str) -> String {
     result.push_str(rest);
     result
 }
-
-/// Replace paired `marker` with open/close HTML tags.
 fn convert_pattern(input: &str, marker: &str, open: &str, close: &str) -> String {
     let mut result = String::with_capacity(input.len());
     let mut rest = input;
     let mut opened = false;
-
     while let Some(pos) = rest.find(marker) {
         result.push_str(&rest[..pos]);
         if opened {
@@ -588,14 +515,11 @@ fn convert_pattern(input: &str, marker: &str, open: &str, close: &str) -> String
         rest = &rest[pos + marker.len()..];
     }
     result.push_str(rest);
-    // If unclosed, treat marker as literal
     if opened {
         return input.to_string();
     }
     result
 }
-
-/// Convert `inline code` to <code> tags.
 fn convert_inline_code(input: &str) -> String {
     let mut result = String::with_capacity(input.len());
     let mut rest = input;
@@ -624,40 +548,33 @@ fn convert_inline_code(input: &str) -> String {
         }
     }
 }
-
 pub struct ChannelManager {
     channels: HashMap<String, Arc<dyn Channel>>,
     bus: Arc<MessageBus>,
     dispatch_task: Mutex<Option<JoinHandle<()>>>,
 }
-
 impl ChannelManager {
     pub fn new(config: &Config, bus: &Arc<MessageBus>) -> Result<Self> {
         let mut channels: HashMap<String, Arc<dyn Channel>> = HashMap::new();
-
         if config.channels.telegram.enabled {
             let telegram = TelegramChannel::new(config, bus.clone())?;
             channels.insert("telegram".to_string(), Arc::new(telegram));
         }
-
         Ok(Self {
             channels,
             bus: bus.clone(),
             dispatch_task: Mutex::new(None),
         })
     }
-
     pub fn get_enabled_channels(&self) -> Vec<String> {
         let mut names: Vec<String> = self.channels.keys().cloned().collect();
         names.sort();
         names
     }
-
     pub async fn start_all(&self) -> Result<()> {
         for channel in self.channels.values() {
             channel.start().await?;
         }
-
         let mut out_rx = self.bus.take_outbound_receiver()?;
         let channels = self.channels.clone();
         let task = tokio::spawn(async move {
@@ -675,11 +592,9 @@ impl ChannelManager {
                 }
             }
         });
-
         *self.dispatch_task.lock() = Some(task);
         Ok(())
     }
-
     pub async fn stop_all(&self) -> Result<()> {
         if let Some(task) = self.dispatch_task.lock().take() {
             task.abort();
@@ -690,13 +605,11 @@ impl ChannelManager {
         Ok(())
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{bus::MessageBus, config::Config};
     use std::sync::Arc;
-
     #[test]
     fn base_channel_allowlist_matching() {
         assert!(is_allowed_sender(&[], "anyone"));
@@ -705,21 +618,18 @@ mod tests {
         assert!(is_allowed_sender(&["123456|alice".to_string()], "123456"));
         assert!(!is_allowed_sender(&["123456".to_string()], "654321|bob"));
     }
-
     #[test]
     fn telegram_channel_requires_non_empty_allowlist() {
         let mut cfg = Config::default();
         cfg.channels.telegram.enabled = true;
         cfg.channels.telegram.token = "test-token".to_string();
         cfg.channels.telegram.allow_from.clear();
-
         let bus = Arc::new(MessageBus::new());
         let err = TelegramChannel::new(&cfg, bus)
             .err()
             .expect("expected error");
         assert!(err.to_string().contains("allow_from"));
     }
-
     #[test]
     fn md_to_tg_bold_italic() {
         assert_eq!(
@@ -727,7 +637,6 @@ mod tests {
             "<b>hello</b> and <i>world</i>"
         );
     }
-
     #[test]
     fn md_to_tg_inline_code() {
         assert_eq!(
@@ -735,7 +644,6 @@ mod tests {
             "use <code>cargo build</code> here"
         );
     }
-
     #[test]
     fn md_to_tg_code_block() {
         let input = "before\n```\nfn main() {}\n```\nafter";
@@ -744,13 +652,11 @@ mod tests {
         assert!(html.contains("before"));
         assert!(html.contains("after"));
     }
-
     #[test]
     fn md_to_tg_header_becomes_bold() {
         assert_eq!(markdown_to_telegram_html("# Title"), "<b>Title</b>");
         assert_eq!(markdown_to_telegram_html("## Subtitle"), "<b>Subtitle</b>");
     }
-
     #[test]
     fn md_to_tg_bullet_list() {
         assert_eq!(
@@ -758,14 +664,12 @@ mod tests {
             "• first\n• second"
         );
     }
-
     #[test]
     fn md_to_tg_blockquote() {
         let html = markdown_to_telegram_html("> quoted text");
         assert!(html.contains("▎"));
         assert!(html.contains("quoted text"));
     }
-
     #[test]
     fn md_to_tg_escapes_html() {
         assert_eq!(
@@ -773,7 +677,6 @@ mod tests {
             "a &lt; b &amp; c &gt; d"
         );
     }
-
     #[test]
     fn md_to_tg_hyperlinks() {
         assert_eq!(

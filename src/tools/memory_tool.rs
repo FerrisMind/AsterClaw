@@ -1,18 +1,12 @@
-//! Memory tool — semantic interface for the agent to read/write persistent memory.
-
-use std::collections::HashMap;
-use std::path::PathBuf;
-
-use async_trait::async_trait;
-use serde_json::Value;
-
 use super::{Tool, ToolResult, arg_string};
 use crate::memory::MemoryStore;
-
+use async_trait::async_trait;
+use serde_json::Value;
+use std::collections::HashMap;
+use std::path::PathBuf;
 pub struct MemoryTool {
     store: MemoryStore,
 }
-
 impl MemoryTool {
     pub fn new(workspace: PathBuf) -> Self {
         Self {
@@ -20,17 +14,14 @@ impl MemoryTool {
         }
     }
 }
-
 #[async_trait]
 impl Tool for MemoryTool {
     fn name(&self) -> &str {
         "memory"
     }
-
     fn description(&self) -> &str {
         "Read or write persistent memory (long-term notes and daily journal)"
     }
-
     fn parameters(&self) -> Value {
         serde_json::json!({
             "type": "object",
@@ -48,13 +39,11 @@ impl Tool for MemoryTool {
             "required": ["action"]
         })
     }
-
     async fn execute(&self, args: HashMap<String, Value>, _: &str, _: &str) -> ToolResult {
         let action = match arg_string(&args, "action") {
             Some(a) if !a.is_empty() => a,
             _ => return ToolResult::error("Missing required parameter: action"),
         };
-
         match action.as_str() {
             "read" => {
                 let content = self.store.read_long_term();

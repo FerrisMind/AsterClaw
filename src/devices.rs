@@ -1,5 +1,3 @@
-//! Device event service (USB monitor + outbound notifications).
-
 use crate::bus::{MessageBus, OutboundMessage};
 use crate::constants;
 use crate::state;
@@ -9,20 +7,17 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-
 #[derive(Debug, Clone, Copy)]
 pub struct Config {
     pub enabled: bool,
     pub monitor_usb: bool,
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     Add,
     Remove,
     Change,
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     Usb,
@@ -30,7 +25,6 @@ pub enum Kind {
     Pci,
     Generic,
 }
-
 #[derive(Debug, Clone)]
 pub struct DeviceEvent {
     pub action: Action,
@@ -42,7 +36,6 @@ pub struct DeviceEvent {
     pub capabilities: String,
     pub raw: HashMap<String, String>,
 }
-
 impl DeviceEvent {
     pub fn format_message(&self) -> String {
         let action_text = match self.action {
@@ -68,7 +61,6 @@ impl DeviceEvent {
         msg
     }
 }
-
 fn kind_name(kind: Kind) -> &'static str {
     match kind {
         Kind::Usb => "usb",
@@ -77,14 +69,12 @@ fn kind_name(kind: Kind) -> &'static str {
         Kind::Generic => "generic",
     }
 }
-
 #[async_trait]
 pub trait EventSource: Send + Sync {
     fn kind(&self) -> Kind;
     async fn start(&self) -> anyhow::Result<mpsc::Receiver<DeviceEvent>>;
     async fn stop(&self) -> anyhow::Result<()>;
 }
-
 pub struct Service {
     bus: RwLock<Option<Arc<MessageBus>>>,
     state: state::Manager,
@@ -92,7 +82,6 @@ pub struct Service {
     enabled: bool,
     handlers: Mutex<Vec<JoinHandle<()>>>,
 }
-
 impl Service {
     pub fn new(cfg: Config, workspace: std::path::PathBuf) -> Self {
         let _ = keep_enum_variants();
@@ -108,17 +97,14 @@ impl Service {
             handlers: Mutex::new(Vec::new()),
         }
     }
-
     pub fn set_bus(&mut self, bus: Arc<MessageBus>) {
         *self.bus.write() = Some(bus);
     }
-
     pub async fn start(&self) -> anyhow::Result<()> {
         if !self.enabled || self.sources.is_empty() {
             tracing::info!("devices service disabled or no sources");
             return Ok(());
         }
-
         for src in &self.sources {
             let mut rx = match src.start().await {
                 Ok(ch) => ch,
@@ -136,11 +122,9 @@ impl Service {
             });
             self.handlers.lock().push(handle);
         }
-
         tracing::info!("devices service started");
         Ok(())
     }
-
     pub fn stop(&self) {
         for src in &self.sources {
             let src = Arc::clone(src);
@@ -148,7 +132,6 @@ impl Service {
                 let _ = src.stop().await;
             });
         }
-
         let mut handles = self.handlers.lock();
         for h in handles.drain(..) {
             h.abort();
@@ -156,13 +139,11 @@ impl Service {
         tracing::info!("devices service stopped");
     }
 }
-
 fn keep_enum_variants() -> usize {
     let actions = [Action::Add, Action::Remove, Action::Change];
     let kinds = [Kind::Usb, Kind::Bluetooth, Kind::Pci, Kind::Generic];
     actions.len() + kinds.len()
 }
-
 async fn send_notification(
     bus: Option<&Arc<MessageBus>>,
     state: &state::Manager,
@@ -186,12 +167,10 @@ async fn send_notification(
         })
         .await;
 }
-
 pub struct UsbMonitor {
     #[cfg(target_os = "linux")]
     child: Mutex<Option<std::process::Child>>,
 }
-
 impl UsbMonitor {
     pub fn new() -> Self {
         Self {
@@ -200,25 +179,21 @@ impl UsbMonitor {
         }
     }
 }
-
 #[async_trait]
 impl EventSource for UsbMonitor {
     fn kind(&self) -> Kind {
         Kind::Usb
     }
-
     async fn start(&self) -> anyhow::Result<mpsc::Receiver<DeviceEvent>> {
         #[cfg(not(target_os = "linux"))]
         {
             let (_tx, rx) = mpsc::channel(1);
             return Ok(rx);
         }
-
         #[cfg(target_os = "linux")]
         {
             use std::io::{BufRead, BufReader};
             use std::process::{Command, Stdio};
-
             let mut cmd = Command::new("udevadm");
             cmd.args(["monitor", "--property", "--subsystem-match=usb"])
                 .stdout(Stdio::piped())
@@ -229,7 +204,6 @@ impl EventSource for UsbMonitor {
                 .take()
                 .ok_or_else(|| anyhow::anyhow!("udevadm stdout not available"))?;
             *self.child.lock() = Some(child);
-
             let (tx, rx) = mpsc::channel(64);
             std::thread::spawn(move || {
                 let mut scanner = BufReader::new(stdout);
@@ -237,7 +211,6 @@ impl EventSource for UsbMonitor {
                 let mut props: HashMap<String, String> = HashMap::new();
                 let mut action = String::new();
                 let mut is_udev = false;
-
                 loop {
                     line.clear();
                     let read = scanner.read_line(&mut line).unwrap_or(0);
@@ -257,7 +230,6 @@ impl EventSource for UsbMonitor {
                         is_udev = false;
                         continue;
                     }
-
                     if !l.contains('=') {
                         is_udev = l.trim_start().starts_with("UDEV");
                         continue;
@@ -271,11 +243,9 @@ impl EventSource for UsbMonitor {
                     props.insert(k, v);
                 }
             });
-
             Ok(rx)
         }
     }
-
     async fn stop(&self) -> anyhow::Result<()> {
         #[cfg(target_os = "linux")]
         {
@@ -287,7 +257,6 @@ impl EventSource for UsbMonitor {
         Ok(())
     }
 }
-
 #[cfg(target_os = "linux")]
 fn parse_usb_event(action: &str, props: &HashMap<String, String>) -> Option<DeviceEvent> {
     let subsystem = props.get("SUBSYSTEM")?;
@@ -301,13 +270,11 @@ fn parse_usb_event(action: &str, props: &HashMap<String, String>) -> Option<Devi
     if !dev_type.is_empty() && dev_type != "usb_device" {
         return None;
     }
-
     let action = match action {
         "add" => Action::Add,
         "remove" => Action::Remove,
         _ => return None,
     };
-
     let vendor = props
         .get("ID_VENDOR")
         .or_else(|| props.get("ID_VENDOR_ID"))
@@ -323,12 +290,10 @@ fn parse_usb_event(action: &str, props: &HashMap<String, String>) -> Option<Devi
     if let (Some(busnum), Some(devnum)) = (props.get("BUSNUM"), props.get("DEVNUM")) {
         device_id = format!("{}:{}", busnum, devnum);
     }
-
     let capabilities = props
         .get("ID_USB_CLASS")
         .map(|class| usb_class_capability(class))
         .unwrap_or_else(|| "USB Device".to_string());
-
     Some(DeviceEvent {
         action,
         kind: Kind::Usb,
@@ -340,7 +305,6 @@ fn parse_usb_event(action: &str, props: &HashMap<String, String>) -> Option<Devi
         raw: props.clone(),
     })
 }
-
 #[cfg(target_os = "linux")]
 fn usb_class_capability(class: &str) -> String {
     match class.to_ascii_lowercase().as_str() {
@@ -364,11 +328,9 @@ fn usb_class_capability(class: &str) -> String {
         _ => "USB Device".to_string(),
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn format_message_contains_core_fields() {
         let ev = DeviceEvent {
@@ -386,7 +348,6 @@ mod tests {
         assert!(msg.contains("ACME Cam"));
         assert!(msg.contains("Capabilities: Video"));
     }
-
     #[test]
     fn parse_last_channel_works() {
         assert_eq!(

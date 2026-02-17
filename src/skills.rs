@@ -1,8 +1,5 @@
-//! Skills loader/installer support.
-
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
-
 #[derive(Debug, Clone)]
 pub struct SkillInfo {
     pub name: String,
@@ -10,14 +7,12 @@ pub struct SkillInfo {
     pub source: String,
     pub description: String,
 }
-
 #[derive(Debug, Clone)]
 pub struct SkillsLoader {
     workspace_skills: PathBuf,
     global_skills: PathBuf,
     builtin_skills: PathBuf,
 }
-
 impl SkillsLoader {
     pub fn new(workspace: &Path) -> Self {
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
@@ -28,7 +23,6 @@ impl SkillsLoader {
             cwd.join("skills"),
         )
     }
-
     pub fn new_with_paths(
         workspace_skills: PathBuf,
         global_skills: PathBuf,
@@ -40,7 +34,6 @@ impl SkillsLoader {
             builtin_skills,
         }
     }
-
     pub fn list_skills(&self) -> Vec<SkillInfo> {
         let mut out = Vec::new();
         self.collect_skills(&self.workspace_skills, "workspace", &mut out);
@@ -49,7 +42,6 @@ impl SkillsLoader {
         out.sort_by(|a, b| a.name.cmp(&b.name));
         out
     }
-
     fn collect_skills(&self, dir: &Path, source: &str, out: &mut Vec<SkillInfo>) {
         let entries = match std::fs::read_dir(dir) {
             Ok(v) => v,
@@ -85,7 +77,6 @@ impl SkillsLoader {
             });
         }
     }
-
     pub fn build_skills_summary_xml(&self) -> String {
         let skills = self.list_skills();
         if skills.is_empty() {
@@ -109,7 +100,6 @@ impl SkillsLoader {
         out.push_str("</skills>");
         out
     }
-
     pub fn load_skill(&self, name: &str) -> Option<String> {
         for root in [
             &self.workspace_skills,
@@ -125,19 +115,16 @@ impl SkillsLoader {
         None
     }
 }
-
 #[derive(Debug, Clone)]
 pub struct SkillInstaller {
     workspace: PathBuf,
 }
-
 impl SkillInstaller {
     pub fn new(workspace: &Path) -> Self {
         Self {
             workspace: workspace.to_path_buf(),
         }
     }
-
     pub async fn install_from_github(&self, repo: &str) -> anyhow::Result<String> {
         let repo_name = repo
             .rsplit('/')
@@ -153,7 +140,6 @@ impl SkillInstaller {
         std::fs::write(target.join("SKILL.md"), body)?;
         Ok(repo_name.to_string())
     }
-
     pub fn uninstall(&self, skill_name: &str) -> anyhow::Result<()> {
         let skill_dir = self.workspace.join("skills").join(skill_name);
         if !skill_dir.exists() {
@@ -162,7 +148,6 @@ impl SkillInstaller {
         std::fs::remove_dir_all(skill_dir)?;
         Ok(())
     }
-
     pub async fn list_available_skills(&self) -> anyhow::Result<Vec<AvailableSkill>> {
         let url = "https://raw.githubusercontent.com/sipeed/asterclaw-skills/main/skills.json";
         let body = reqwest::get(url).await?.text().await?;
@@ -170,7 +155,6 @@ impl SkillInstaller {
         Ok(parsed)
     }
 }
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct AvailableSkill {
     pub name: String,
@@ -181,13 +165,11 @@ pub struct AvailableSkill {
     #[serde(default)]
     pub tags: Vec<String>,
 }
-
 #[derive(Debug, Clone, Deserialize)]
 struct FrontMatter {
     name: Option<String>,
     description: Option<String>,
 }
-
 fn parse_frontmatter(raw: &str) -> Option<FrontMatter> {
     let mut lines = raw.lines();
     if lines.next()? != "---" {
@@ -201,7 +183,6 @@ fn parse_frontmatter(raw: &str) -> Option<FrontMatter> {
         block.push_str(l);
         block.push('\n');
     }
-
     let name = block
         .lines()
         .find_map(|l| l.strip_prefix("name:"))
@@ -212,7 +193,6 @@ fn parse_frontmatter(raw: &str) -> Option<FrontMatter> {
         .map(|v| v.trim().trim_matches('"').trim_matches('\'').to_string());
     Some(FrontMatter { name, description })
 }
-
 fn strip_frontmatter(raw: &str) -> String {
     if !raw.starts_with("---\n") {
         return raw.to_string();
@@ -222,33 +202,27 @@ fn strip_frontmatter(raw: &str) -> String {
     let _ = parts.next();
     parts.next().unwrap_or(raw).to_string()
 }
-
 fn escape_xml(input: &str) -> String {
     input
         .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
 }
-
 #[cfg(test)]
 mod tests {
     use super::SkillsLoader;
-
     #[test]
     fn skills_precedence_workspace_over_global_over_builtin() {
         let root = tempfile::tempdir().expect("tmp");
         let ws = root.path().join("ws");
         let global = root.path().join("global");
         let builtin = root.path().join("builtin");
-
         std::fs::create_dir_all(ws.join("demo")).expect("mkdir ws");
         std::fs::create_dir_all(global.join("demo")).expect("mkdir global");
         std::fs::create_dir_all(builtin.join("demo")).expect("mkdir builtin");
-
         std::fs::write(ws.join("demo/SKILL.md"), "workspace").expect("write ws");
         std::fs::write(global.join("demo/SKILL.md"), "global").expect("write global");
         std::fs::write(builtin.join("demo/SKILL.md"), "builtin").expect("write builtin");
-
         let loader = SkillsLoader::new_with_paths(ws, global, builtin);
         let skill = loader.load_skill("demo").expect("skill");
         assert_eq!(skill.trim(), "workspace");

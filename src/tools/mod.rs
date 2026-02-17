@@ -1,5 +1,3 @@
-//! Agent tools for filesystem, shell, web, and messaging operations.
-
 mod cron_tool;
 mod device;
 mod exec;
@@ -7,29 +5,23 @@ mod fs;
 mod memory_tool;
 mod messaging;
 mod web;
-
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-
-use async_trait::async_trait;
-use parking_lot::{Mutex, RwLock};
-use serde_json::Value;
-
 use crate::bus::{InboundMessage, MessageBus};
 use crate::providers::ToolDefinition;
 use crate::providers::{LlmResponse, Message, Provider};
-
-// Re-export tool implementations for tests and external use.
+use async_trait::async_trait;
 pub use cron_tool::CronTool;
 pub use device::{I2cTool, SpiTool};
 pub use exec::ExecTool;
 pub use fs::{AppendFileTool, EditFileTool, ListDirTool, ReadFileTool, WriteFileTool};
 pub use memory_tool::MemoryTool;
 pub use messaging::{MessageTool, SpawnTool, SubagentTool};
+use parking_lot::{Mutex, RwLock};
+use serde_json::Value;
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 pub use web::{WebFetchTool, WebSearchTool};
-
 #[derive(Debug, Clone)]
 pub struct ToolResult {
     pub for_user: Option<String>,
@@ -37,19 +29,16 @@ pub struct ToolResult {
     pub silent: bool,
     pub error: Option<String>,
 }
-
 #[derive(Debug, Clone)]
 pub struct ToolLoopResult {
     pub content: String,
     pub iterations: i32,
 }
-
 #[derive(Debug, Clone)]
 pub struct SubagentTask {
     pub status: String,
     pub result: String,
 }
-
 pub struct SubagentManager {
     tasks: Arc<Mutex<HashMap<String, SubagentTask>>>,
     next_id: AtomicU64,
@@ -60,7 +49,6 @@ pub struct SubagentManager {
     max_iterations: i32,
     tool_output_max_chars: usize,
 }
-
 #[derive(Clone)]
 pub struct ToolLoopConfig<'a> {
     pub provider: &'a dyn Provider,
@@ -72,7 +60,6 @@ pub struct ToolLoopConfig<'a> {
     pub chat_id: &'a str,
     pub tool_output_max_chars: usize,
 }
-
 impl SubagentManager {
     pub fn new(
         provider: Arc<dyn Provider>,
@@ -93,7 +80,6 @@ impl SubagentManager {
             tool_output_max_chars,
         }
     }
-
     pub fn spawn(
         self: &Arc<Self>,
         task: String,
@@ -106,14 +92,12 @@ impl SubagentManager {
         } else {
             format!("Spawned subagent '{}' for task: {}", label, task)
         };
-
         let id = format!("subagent-{}", self.next_id.fetch_add(1, Ordering::SeqCst));
         let rec = SubagentTask {
             status: "running".to_string(),
             result: String::new(),
         };
         self.tasks.lock().insert(id.clone(), rec);
-
         let manager = self.clone();
         let task_for_spawn = task.clone();
         let label_for_spawn = label.clone();
@@ -130,10 +114,8 @@ impl SubagentManager {
                 )
                 .await;
         });
-
         ack
     }
-
     pub async fn run_sync(
         &self,
         task: String,
@@ -164,11 +146,9 @@ impl SubagentManager {
             &mut messages,
         )
         .await?;
-
         let _ = label;
         Ok(loop_result)
     }
-
     async fn run_task(
         self: Arc<Self>,
         task_id: String,
@@ -185,7 +165,6 @@ impl SubagentManager {
                 origin_chat_id.clone(),
             )
             .await;
-
         {
             let mut tasks = self.tasks.lock();
             if let Some(rec) = tasks.get_mut(&task_id) {
@@ -201,7 +180,6 @@ impl SubagentManager {
                 }
             }
         }
-
         let announce = match result {
             Ok(loop_result) => {
                 let title = if label.trim().is_empty() {
@@ -230,7 +208,6 @@ impl SubagentManager {
             .await;
     }
 }
-
 pub async fn run_tool_loop(
     cfg: ToolLoopConfig<'_>,
     messages: &mut Vec<Message>,
@@ -275,7 +252,6 @@ pub async fn run_tool_loop(
         iterations,
     })
 }
-
 fn truncate_tool_loop_message(content: String, max_chars: usize) -> String {
     if max_chars == 0 {
         return content;
@@ -288,7 +264,6 @@ fn truncate_tool_loop_message(content: String, max_chars: usize) -> String {
     let omitted = total - max_chars;
     format!("{kept}\n\n[tool output truncated: omitted {omitted} chars]")
 }
-
 impl ToolResult {
     pub fn new(content: &str) -> Self {
         Self {
@@ -298,7 +273,6 @@ impl ToolResult {
             error: None,
         }
     }
-
     pub fn error(msg: &str) -> Self {
         Self {
             for_user: None,
@@ -308,7 +282,6 @@ impl ToolResult {
         }
     }
 }
-
 #[async_trait]
 pub trait Tool: Send + Sync {
     fn name(&self) -> &str;
@@ -324,9 +297,7 @@ pub trait Tool: Send + Sync {
         chat_id: &str,
     ) -> ToolResult;
 }
-
 use crate::config::{ExecToolsConfig, WebToolsConfig};
-
 #[derive(Clone)]
 pub struct ToolRegistry {
     workspace: PathBuf,
@@ -337,9 +308,8 @@ pub struct ToolRegistry {
     exec_config: ExecToolsConfig,
     cron_service: Arc<parking_lot::Mutex<crate::cron::CronService>>,
 }
-
 impl ToolRegistry {
-    #[allow(dead_code)] // Used by tests
+    #[allow(dead_code)]
     pub fn new(workspace: PathBuf, restrict_to_workspace: bool) -> Self {
         Self::with_tool_config(
             workspace,
@@ -348,8 +318,7 @@ impl ToolRegistry {
             ExecToolsConfig::default(),
         )
     }
-
-    #[allow(dead_code)] // Backward-compatible constructor.
+    #[allow(dead_code)]
     pub fn with_web_config(
         workspace: PathBuf,
         restrict_to_workspace: bool,
@@ -362,7 +331,6 @@ impl ToolRegistry {
             ExecToolsConfig::default(),
         )
     }
-
     pub fn with_tool_config(
         workspace: PathBuf,
         restrict_to_workspace: bool,
@@ -381,7 +349,6 @@ impl ToolRegistry {
             cron_service,
         )
     }
-
     pub fn with_cron_service(
         workspace: PathBuf,
         restrict_to_workspace: bool,
@@ -401,11 +368,9 @@ impl ToolRegistry {
         registry.register_builtin_tools();
         registry
     }
-
     pub fn cron_service(&self) -> Arc<parking_lot::Mutex<crate::cron::CronService>> {
         self.cron_service.clone()
     }
-
     fn register_builtin_tools(&mut self) {
         self.register(ReadFileTool::new(
             self.workspace.clone(),
@@ -431,7 +396,6 @@ impl ToolRegistry {
             self.workspace.clone(),
             self.exec_config.clone(),
         ));
-        // Shared HTTP client — avoids duplicating TLS/connection pool per tool (~5-7 MB each).
         let shared_http = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .connect_timeout(std::time::Duration::from_secs(10))
@@ -452,41 +416,33 @@ impl ToolRegistry {
         self.register(MessageTool::new());
         self.register(SpawnTool::new(self.subagent_manager.clone()));
         self.register(SubagentTool::new(self.subagent_manager.clone()));
-        // I2C/SPI return runtime errors on non-Linux; always register for discoverability.
         self.register(I2cTool);
         self.register(SpiTool);
         self.register(CronTool::new(self.cron_service.clone()));
         self.register(MemoryTool::new(self.workspace.clone()));
     }
-
     pub fn register<T: Tool + 'static>(&mut self, tool: T) {
         self.tools.insert(tool.name().to_string(), Arc::new(tool));
     }
-
     pub fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
         self.tools.get(name).cloned()
     }
-
     pub fn list_names(&self) -> Vec<String> {
         let mut names: Vec<String> = self.tools.keys().cloned().collect();
         names.sort();
         names
     }
-
     pub fn len(&self) -> usize {
         self.tools.len()
     }
-
     pub fn set_subagent_manager(&self, manager: Arc<SubagentManager>) {
         *self.subagent_manager.write() = Some(manager);
     }
-
     pub fn get_summaries(&self) -> Vec<String> {
         let mut result: Vec<String> = self.tools.values().map(|t| t.summary()).collect();
         result.sort();
         result
     }
-
     pub fn to_provider_defs(&self) -> Vec<ToolDefinition> {
         self.tools
             .values()
@@ -501,9 +457,6 @@ impl ToolRegistry {
             .collect()
     }
 }
-
-// ── Shared helpers used by tool implementations ──────────────────────────
-
 pub(crate) fn resolve_path(workspace: &std::path::Path, path: &str) -> PathBuf {
     let p = PathBuf::from(path);
     if p.is_absolute() {
@@ -512,7 +465,6 @@ pub(crate) fn resolve_path(workspace: &std::path::Path, path: &str) -> PathBuf {
         workspace.join(p)
     }
 }
-
 pub(crate) fn canonicalize_for_check(
     path: &std::path::Path,
     allow_missing_leaf: bool,
@@ -523,7 +475,6 @@ pub(crate) fn canonicalize_for_check(
     if !allow_missing_leaf {
         return Err(format!("Path not found: {}", path.display()));
     }
-
     let mut missing_parts = Vec::new();
     let mut cursor = path;
     while !cursor.exists() {
@@ -535,14 +486,12 @@ pub(crate) fn canonicalize_for_check(
             .parent()
             .ok_or_else(|| format!("Invalid path: {}", path.display()))?;
     }
-
     let mut resolved = cursor.canonicalize().map_err(|e| e.to_string())?;
     for part in missing_parts.iter().rev() {
         resolved.push(part);
     }
     Ok(resolved)
 }
-
 pub(crate) fn ensure_within_workspace(
     workspace: &std::path::Path,
     candidate_path: &std::path::Path,
@@ -555,17 +504,14 @@ pub(crate) fn ensure_within_workspace(
     }
     Ok(())
 }
-
 pub(crate) fn arg_string(args: &HashMap<String, Value>, key: &str) -> Option<String> {
     args.get(key)
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
 }
-
 pub(crate) fn arg_i64(args: &HashMap<String, Value>, key: &str) -> Option<i64> {
     args.get(key).and_then(|v| v.as_i64())
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -574,15 +520,12 @@ mod tests {
     use crate::providers::{LlmResponse, Provider, ToolDefinition};
     use std::sync::Arc;
     use tempfile::TempDir;
-
     async fn edit_call(ws: &std::path::Path, args: HashMap<String, Value>) -> ToolResult {
         let registry = ToolRegistry::new(ws.to_path_buf(), true);
         let tool = registry.get("edit_file").expect("tool should exist");
         tool.execute(args, "", "").await
     }
-
     struct MockProvider;
-
     #[async_trait::async_trait]
     impl Provider for MockProvider {
         async fn chat_with_options(
@@ -600,21 +543,18 @@ mod tests {
             })
         }
     }
-
     #[tokio::test]
     async fn write_file_allows_new_file_inside_workspace() {
         let tmp = TempDir::new().expect("tmp dir");
         let ws = tmp.path().to_path_buf();
         let registry = ToolRegistry::new(ws.clone(), true);
         let tool = registry.get("write_file").expect("tool should exist");
-
         let mut args = HashMap::new();
         args.insert(
             "path".to_string(),
             Value::String("notes/test.txt".to_string()),
         );
         args.insert("content".to_string(), Value::String("hello".to_string()));
-
         let result = tool.execute(args, "", "").await;
         assert!(result.error.is_none(), "{:?}", result.error);
         assert_eq!(
@@ -622,22 +562,18 @@ mod tests {
             "hello"
         );
     }
-
     #[tokio::test]
     async fn write_file_blocks_escape_outside_workspace() {
         let tmp = TempDir::new().expect("tmp dir");
         let ws = tmp.path().to_path_buf();
         let registry = ToolRegistry::new(ws, true);
         let tool = registry.get("write_file").expect("tool should exist");
-
         let mut args = HashMap::new();
         args.insert("path".to_string(), Value::String("../evil.txt".to_string()));
         args.insert("content".to_string(), Value::String("x".to_string()));
-
         let result = tool.execute(args, "", "").await;
         assert!(result.error.is_some());
     }
-
     #[tokio::test]
     async fn web_fetch_rejects_invalid_scheme() {
         let tool = WebFetchTool::new(200, reqwest::Client::new());
@@ -649,7 +585,6 @@ mod tests {
         let result = tool.execute(args, "", "").await;
         assert!(result.error.is_some());
     }
-
     #[tokio::test]
     async fn message_tool_is_silent_and_for_user() {
         let tool = MessageTool::new();
@@ -660,13 +595,11 @@ mod tests {
         assert!(result.silent);
         assert_eq!(result.for_user.as_deref(), Some("ping"));
     }
-
     #[tokio::test]
     async fn edit_file_success_replace_once() {
         let tmp = TempDir::new().expect("tmp dir");
         let path = tmp.path().join("test.txt");
         std::fs::write(&path, "Hello World\nThis is a test").expect("write");
-
         let mut args = HashMap::new();
         args.insert(
             "path".to_string(),
@@ -677,7 +610,6 @@ mod tests {
             "new_text".to_string(),
             Value::String("Universe".to_string()),
         );
-
         let result = edit_call(tmp.path(), args).await;
         assert!(result.error.is_none(), "{:?}", result.error);
         assert!(result.silent);
@@ -685,7 +617,6 @@ mod tests {
         assert!(content.contains("Hello Universe"));
         assert!(!content.contains("Hello World"));
     }
-
     #[tokio::test]
     async fn edit_file_not_found() {
         let tmp = TempDir::new().expect("tmp dir");
@@ -697,7 +628,6 @@ mod tests {
         );
         args.insert("old_text".to_string(), Value::String("a".to_string()));
         args.insert("new_text".to_string(), Value::String("b".to_string()));
-
         let result = edit_call(tmp.path(), args).await;
         assert!(result.error.is_some());
         assert!(
@@ -709,13 +639,11 @@ mod tests {
                 || result.error.as_ref().expect("err").contains("not found")
         );
     }
-
     #[tokio::test]
     async fn edit_file_old_text_missing() {
         let tmp = TempDir::new().expect("tmp dir");
         let path = tmp.path().join("test.txt");
         std::fs::write(&path, "Hello World").expect("write");
-
         let mut args = HashMap::new();
         args.insert(
             "path".to_string(),
@@ -723,18 +651,15 @@ mod tests {
         );
         args.insert("old_text".to_string(), Value::String("Goodbye".to_string()));
         args.insert("new_text".to_string(), Value::String("Hello".to_string()));
-
         let result = edit_call(tmp.path(), args).await;
         assert!(result.error.is_some());
         assert!(result.error.as_ref().expect("err").contains("not found"));
     }
-
     #[tokio::test]
     async fn edit_file_blocks_multiple_matches() {
         let tmp = TempDir::new().expect("tmp dir");
         let path = tmp.path().join("test.txt");
         std::fs::write(&path, "test test test").expect("write");
-
         let mut args = HashMap::new();
         args.insert(
             "path".to_string(),
@@ -742,12 +667,10 @@ mod tests {
         );
         args.insert("old_text".to_string(), Value::String("test".to_string()));
         args.insert("new_text".to_string(), Value::String("done".to_string()));
-
         let result = edit_call(tmp.path(), args).await;
         assert!(result.error.is_some());
         assert!(result.error.as_ref().expect("err").contains("appears"));
     }
-
     #[tokio::test]
     async fn edit_file_missing_required_params() {
         let tmp = TempDir::new().expect("tmp dir");
@@ -763,14 +686,12 @@ mod tests {
                 .contains("Missing required parameter")
         );
     }
-
     #[tokio::test]
     async fn edit_file_blocks_outside_workspace() {
         let ws = TempDir::new().expect("ws");
         let out = TempDir::new().expect("out");
         let path = out.path().join("x.txt");
         std::fs::write(&path, "a").expect("write");
-
         let mut args = HashMap::new();
         args.insert(
             "path".to_string(),
@@ -778,7 +699,6 @@ mod tests {
         );
         args.insert("old_text".to_string(), Value::String("a".to_string()));
         args.insert("new_text".to_string(), Value::String("b".to_string()));
-
         let result = edit_call(ws.path(), args).await;
         assert!(result.error.is_some());
         assert!(
@@ -789,7 +709,6 @@ mod tests {
                 .contains("outside workspace")
         );
     }
-
     #[tokio::test]
     async fn append_file_success() {
         let tmp = TempDir::new().expect("tmp");
@@ -797,7 +716,6 @@ mod tests {
         std::fs::write(&path, "Initial content").expect("write");
         let registry = ToolRegistry::new(tmp.path().to_path_buf(), true);
         let tool = registry.get("append_file").expect("tool");
-
         let mut args = HashMap::new();
         args.insert(
             "path".to_string(),
@@ -807,7 +725,6 @@ mod tests {
             "content".to_string(),
             Value::String("\nAppended content".to_string()),
         );
-
         let result = tool.execute(args, "", "").await;
         assert!(result.error.is_none(), "{:?}", result.error);
         assert!(result.silent);
@@ -815,14 +732,12 @@ mod tests {
         assert!(content.contains("Initial content"));
         assert!(content.contains("Appended content"));
     }
-
     #[tokio::test]
     async fn cron_tool_add_list_remove_flow() {
         let tmp = TempDir::new().expect("tmp");
         let ws = tmp.path().to_path_buf();
         let registry = ToolRegistry::new(ws.clone(), true);
         let tool = registry.get("cron").expect("cron tool");
-
         let mut add_args = HashMap::new();
         add_args.insert("action".to_string(), Value::String("add".to_string()));
         add_args.insert("message".to_string(), Value::String("Ping".to_string()));
@@ -830,7 +745,6 @@ mod tests {
         let add_res = tool.execute(add_args, "telegram", "123").await;
         assert!(add_res.error.is_none(), "{:?}", add_res.error);
         assert!(add_res.silent);
-
         let mut list_args = HashMap::new();
         list_args.insert("action".to_string(), Value::String("list".to_string()));
         let list_res = tool.execute(list_args, "telegram", "123").await;
@@ -838,13 +752,11 @@ mod tests {
         let list_text = list_res.for_llm.unwrap_or_default();
         assert!(list_text.contains("Scheduled jobs"));
         assert!(list_text.contains("Ping"));
-
         let jobs_path = ws.join("cron").join("jobs.json");
         let service = CronService::new(&jobs_path, None);
         let jobs = service.list_jobs(false);
         assert_eq!(jobs.len(), 1);
         let job_id = jobs[0].id.clone();
-
         let mut remove_args = HashMap::new();
         remove_args.insert("action".to_string(), Value::String("remove".to_string()));
         remove_args.insert("id".to_string(), Value::String(job_id));
@@ -852,7 +764,6 @@ mod tests {
         assert!(remove_res.error.is_none(), "{:?}", remove_res.error);
         assert!(remove_res.silent);
     }
-
     #[tokio::test]
     async fn subagent_tool_executes_synchronously() {
         let tmp = TempDir::new().expect("tmp");
@@ -868,7 +779,6 @@ mod tests {
         ));
         registry.set_subagent_manager(manager);
         let tool = registry.get("subagent").expect("subagent tool");
-
         let mut args = HashMap::new();
         args.insert("task".to_string(), Value::String("do thing".to_string()));
         let result = tool.execute(args, "telegram", "123").await;
@@ -881,7 +791,6 @@ mod tests {
                 .contains("Subagent task completed")
         );
     }
-
     #[tokio::test]
     async fn spawn_tool_runs_async_and_announces_result() {
         let tmp = TempDir::new().expect("tmp");
@@ -898,14 +807,12 @@ mod tests {
         ));
         registry.set_subagent_manager(manager);
         let tool = registry.get("spawn").expect("spawn tool");
-
         let mut args = HashMap::new();
         args.insert("task".to_string(), Value::String("background".to_string()));
         args.insert("label".to_string(), Value::String("bg1".to_string()));
         let result = tool.execute(args, "telegram", "777").await;
         assert!(result.error.is_none(), "{:?}", result.error);
         assert!(result.silent);
-
         let msg = tokio::time::timeout(std::time::Duration::from_secs(2), inbound_rx.recv())
             .await
             .expect("timeout waiting inbound")
@@ -914,23 +821,18 @@ mod tests {
         assert_eq!(msg.chat_id, "telegram:777");
         assert!(msg.content.contains("completed") || msg.content.contains("failed"));
     }
-
     #[tokio::test]
     async fn i2c_requires_action() {
         let tool = I2cTool;
         let res = tool.execute(HashMap::new(), "", "").await;
         assert!(res.error.is_some());
     }
-
     #[tokio::test]
     async fn spi_requires_action() {
         let tool = SpiTool;
         let res = tool.execute(HashMap::new(), "", "").await;
         assert!(res.error.is_some());
     }
-
-    // ── read_file tests ─────────────────────────────────────────────────
-
     #[tokio::test]
     async fn read_file_returns_content() {
         let tmp = TempDir::new().expect("tmp");
@@ -938,7 +840,6 @@ mod tests {
         std::fs::write(&path, "hello world").expect("write");
         let registry = ToolRegistry::new(tmp.path().to_path_buf(), true);
         let tool = registry.get("read_file").expect("tool");
-
         let mut args = HashMap::new();
         args.insert(
             "path".to_string(),
@@ -948,19 +849,16 @@ mod tests {
         assert!(result.error.is_none(), "{:?}", result.error);
         assert_eq!(result.for_llm.as_deref(), Some("hello world"));
     }
-
     #[tokio::test]
     async fn read_file_missing_returns_error() {
         let tmp = TempDir::new().expect("tmp");
         let registry = ToolRegistry::new(tmp.path().to_path_buf(), true);
         let tool = registry.get("read_file").expect("tool");
-
         let mut args = HashMap::new();
         args.insert("path".to_string(), Value::String("nope.txt".to_string()));
         let result = tool.execute(args, "", "").await;
         assert!(result.error.is_some());
     }
-
     #[tokio::test]
     async fn read_file_blocks_outside_workspace() {
         let ws = TempDir::new().expect("ws");
@@ -969,7 +867,6 @@ mod tests {
         std::fs::write(&secret, "top-secret").expect("write");
         let registry = ToolRegistry::new(ws.path().to_path_buf(), true);
         let tool = registry.get("read_file").expect("tool");
-
         let mut args = HashMap::new();
         args.insert(
             "path".to_string(),
@@ -978,9 +875,6 @@ mod tests {
         let result = tool.execute(args, "", "").await;
         assert!(result.error.is_some());
     }
-
-    // ── list_dir tests ──────────────────────────────────────────────────
-
     #[tokio::test]
     async fn list_dir_shows_files_and_dirs() {
         let tmp = TempDir::new().expect("tmp");
@@ -988,7 +882,6 @@ mod tests {
         std::fs::create_dir(tmp.path().join("subdir")).expect("mkdir");
         let registry = ToolRegistry::new(tmp.path().to_path_buf(), true);
         let tool = registry.get("list_dir").expect("tool");
-
         let mut args = HashMap::new();
         args.insert("path".to_string(), Value::String(".".to_string()));
         let result = tool.execute(args, "", "").await;
@@ -997,25 +890,19 @@ mod tests {
         assert!(text.contains("[FILE] file.txt"));
         assert!(text.contains("[DIR] subdir"));
     }
-
     #[tokio::test]
     async fn list_dir_empty_workspace() {
         let tmp = TempDir::new().expect("tmp");
         let registry = ToolRegistry::new(tmp.path().to_path_buf(), true);
         let tool = registry.get("list_dir").expect("tool");
-
         let result = tool.execute(HashMap::new(), "", "").await;
         assert!(result.error.is_none(), "{:?}", result.error);
     }
-
-    // ── exec tests ──────────────────────────────────────────────────────
-
     #[tokio::test]
     async fn exec_runs_simple_command() {
         let tmp = TempDir::new().expect("tmp");
         let registry = ToolRegistry::new(tmp.path().to_path_buf(), true);
         let tool = registry.get("exec").expect("tool");
-
         let mut args = HashMap::new();
         let cmd = "echo hello";
         args.insert("command".to_string(), Value::String(cmd.to_string()));
@@ -1023,13 +910,11 @@ mod tests {
         assert!(result.error.is_none(), "{:?}", result.error);
         assert!(result.for_llm.unwrap_or_default().contains("hello"));
     }
-
     #[tokio::test]
     async fn exec_blocks_dangerous_commands() {
         let tmp = TempDir::new().expect("tmp");
         let registry = ToolRegistry::new(tmp.path().to_path_buf(), true);
         let tool = registry.get("exec").expect("tool");
-
         let dangerous = vec![
             "rm -rf /",
             "sudo reboot",
@@ -1048,32 +933,23 @@ mod tests {
             );
         }
     }
-
     #[tokio::test]
     async fn exec_missing_command_returns_error() {
         let tmp = TempDir::new().expect("tmp");
         let registry = ToolRegistry::new(tmp.path().to_path_buf(), true);
         let tool = registry.get("exec").expect("tool");
-
         let result = tool.execute(HashMap::new(), "", "").await;
         assert!(result.error.is_some());
     }
-
-    // ── web_search tests ────────────────────────────────────────────────
-
     #[tokio::test]
     async fn web_search_missing_query_returns_error() {
         let tmp = TempDir::new().expect("tmp");
         let registry = ToolRegistry::new(tmp.path().to_path_buf(), true);
         let tool = registry.get("web_search").expect("tool");
-
         let result = tool.execute(HashMap::new(), "", "").await;
         assert!(result.error.is_some());
         assert!(result.error.unwrap().contains("query"));
     }
-
-    // ── registry meta tests ─────────────────────────────────────────────
-
     #[tokio::test]
     async fn all_15_tools_are_registered() {
         let tmp = TempDir::new().expect("tmp");
@@ -1099,13 +975,6 @@ mod tests {
         assert_eq!(names, expected, "Registered tools mismatch");
         assert_eq!(registry.len(), 15);
     }
-
-    // ═══════════════════════════════════════════════════════════════════
-    //  Additional scenario tests — each tool must have ≥ 2-3 tests
-    // ═══════════════════════════════════════════════════════════════════
-
-    // ── write_file: overwrite existing file ─────────────────────────
-
     #[tokio::test]
     async fn write_file_overwrites_existing_content() {
         let tmp = TempDir::new().expect("tmp");
@@ -1113,7 +982,6 @@ mod tests {
         std::fs::write(&path, "old content").expect("seed");
         let registry = ToolRegistry::new(tmp.path().to_path_buf(), true);
         let tool = registry.get("write_file").expect("tool");
-
         let mut args = HashMap::new();
         args.insert(
             "path".to_string(),
@@ -1127,36 +995,27 @@ mod tests {
         assert!(result.error.is_none(), "{:?}", result.error);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "new content");
     }
-
     #[tokio::test]
     async fn write_file_missing_path_returns_error() {
         let tmp = TempDir::new().expect("tmp");
         let registry = ToolRegistry::new(tmp.path().to_path_buf(), true);
         let tool = registry.get("write_file").expect("tool");
-
         let mut args = HashMap::new();
         args.insert("content".to_string(), Value::String("x".to_string()));
         let result = tool.execute(args, "", "").await;
         assert!(result.error.is_some());
         assert!(result.error.unwrap().contains("path"));
     }
-
-    // ── list_dir: nonexistent path ──────────────────────────────────
-
     #[tokio::test]
     async fn list_dir_nonexistent_returns_error() {
         let tmp = TempDir::new().expect("tmp");
         let registry = ToolRegistry::new(tmp.path().to_path_buf(), true);
         let tool = registry.get("list_dir").expect("tool");
-
         let mut args = HashMap::new();
         args.insert("path".to_string(), Value::String("no_such_dir".to_string()));
         let result = tool.execute(args, "", "").await;
         assert!(result.error.is_some());
     }
-
-    // ── append_file: creates new + blocks outside workspace ─────────
-
     #[tokio::test]
     async fn append_file_creates_new_file_if_missing() {
         let tmp = TempDir::new().expect("tmp");
@@ -1164,7 +1023,6 @@ mod tests {
         assert!(!path.exists());
         let registry = ToolRegistry::new(tmp.path().to_path_buf(), true);
         let tool = registry.get("append_file").expect("tool");
-
         let mut args = HashMap::new();
         args.insert(
             "path".to_string(),
@@ -1178,7 +1036,6 @@ mod tests {
         assert!(result.error.is_none(), "{:?}", result.error);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "first line");
     }
-
     #[tokio::test]
     async fn append_file_blocks_outside_workspace() {
         let ws = TempDir::new().expect("ws");
@@ -1187,7 +1044,6 @@ mod tests {
         std::fs::write(&path, "x").expect("seed");
         let registry = ToolRegistry::new(ws.path().to_path_buf(), true);
         let tool = registry.get("append_file").expect("tool");
-
         let mut args = HashMap::new();
         args.insert(
             "path".to_string(),
@@ -1197,17 +1053,12 @@ mod tests {
         let result = tool.execute(args, "", "").await;
         assert!(result.error.is_some());
     }
-
-    // ── exec: more scenario tests ───────────────────────────────────
-
     #[tokio::test]
     async fn exec_captures_stderr_on_failure() {
         let tmp = TempDir::new().expect("tmp");
         let registry = ToolRegistry::new(tmp.path().to_path_buf(), true);
         let tool = registry.get("exec").expect("tool");
-
         let mut args = HashMap::new();
-        // Nonexistent binary returns an error
         let cmd = if cfg!(target_os = "windows") {
             "cmd /c exit 1"
         } else {
@@ -1217,13 +1068,11 @@ mod tests {
         let result = tool.execute(args, "", "").await;
         assert!(result.error.is_some());
     }
-
     #[tokio::test]
     async fn exec_truncates_large_stdout() {
         let tmp = TempDir::new().expect("tmp");
         let registry = ToolRegistry::new(tmp.path().to_path_buf(), true);
         let tool = registry.get("exec").expect("tool");
-
         let mut args = HashMap::new();
         let cmd = if cfg!(target_os = "windows") {
             "for /L %i in (1,1,100000) do @echo 1234567890"
@@ -1245,26 +1094,21 @@ mod tests {
             text.len()
         );
     }
-
     #[tokio::test]
     async fn exec_deny_list_case_insensitive() {
         let tmp = TempDir::new().expect("tmp");
         let registry = ToolRegistry::new(tmp.path().to_path_buf(), true);
         let tool = registry.get("exec").expect("tool");
-
-        // Upper case should still be blocked
         let mut args = HashMap::new();
         args.insert("command".to_string(), Value::String("RM -RF /".to_string()));
         let result = tool.execute(args, "", "").await;
         assert!(result.error.is_some(), "uppercase rm -rf should be blocked");
     }
-
     #[tokio::test]
     async fn exec_requires_confirm_for_state_changing_command() {
         let tmp = TempDir::new().expect("tmp");
         let registry = ToolRegistry::new(tmp.path().to_path_buf(), true);
         let tool = registry.get("exec").expect("tool");
-
         let mut args = HashMap::new();
         args.insert(
             "command".to_string(),
@@ -1280,9 +1124,6 @@ mod tests {
                 .contains("confirm=true")
         );
     }
-
-    // ── web_fetch: missing url + parse error ────────────────────────
-
     #[tokio::test]
     async fn web_fetch_missing_url_returns_error() {
         let tool = WebFetchTool::new(200, reqwest::Client::new());
@@ -1290,7 +1131,6 @@ mod tests {
         assert!(result.error.is_some());
         assert!(result.error.unwrap().contains("url"));
     }
-
     #[tokio::test]
     async fn web_fetch_invalid_url_returns_error() {
         let tool = WebFetchTool::new(200, reqwest::Client::new());
@@ -1302,7 +1142,6 @@ mod tests {
         let result = tool.execute(args, "", "").await;
         assert!(result.error.is_some());
     }
-
     #[tokio::test]
     async fn web_fetch_blocks_localhost_urls() {
         let tool = WebFetchTool::new(200, reqwest::Client::new());
@@ -1315,9 +1154,6 @@ mod tests {
         assert!(result.error.is_some());
         assert!(result.error.as_deref().unwrap_or_default().contains("SSRF"));
     }
-
-    // ── message: missing content + cross-channel + empty channel ────
-
     #[tokio::test]
     async fn message_missing_content_returns_error() {
         let tool = MessageTool::new();
@@ -1325,7 +1161,6 @@ mod tests {
         assert!(result.error.is_some());
         assert!(result.error.unwrap().contains("content"));
     }
-
     #[tokio::test]
     async fn message_cross_channel_blocked() {
         let tool = MessageTool::new();
@@ -1336,7 +1171,6 @@ mod tests {
         assert!(result.error.is_some());
         assert!(result.error.unwrap().contains("cross-channel"));
     }
-
     #[tokio::test]
     async fn message_empty_channel_returns_error() {
         let tool = MessageTool::new();
@@ -1345,9 +1179,6 @@ mod tests {
         let result = tool.execute(args, "", "").await;
         assert!(result.error.is_some());
     }
-
-    // ── i2c: detect action + invalid action ─────────────────────────
-
     #[tokio::test]
     async fn i2c_detect_returns_no_buses_on_non_linux() {
         let tool = I2cTool;
@@ -1357,9 +1188,7 @@ mod tests {
         if !cfg!(target_os = "linux") {
             assert!(result.error.is_some());
         }
-        // On linux without /dev/i2c-* it returns "No I2C buses found" (no error)
     }
-
     #[tokio::test]
     async fn i2c_invalid_action_returns_error() {
         let tool = I2cTool;
@@ -1368,9 +1197,6 @@ mod tests {
         let result = tool.execute(args, "", "").await;
         assert!(result.error.is_some());
     }
-
-    // ── spi: list action + invalid action ───────────────────────────
-
     #[tokio::test]
     async fn spi_list_returns_no_devices_on_non_linux() {
         let tool = SpiTool;
@@ -1381,7 +1207,6 @@ mod tests {
             assert!(result.error.is_some());
         }
     }
-
     #[tokio::test]
     async fn spi_invalid_action_returns_error() {
         let tool = SpiTool;
@@ -1390,70 +1215,53 @@ mod tests {
         let result = tool.execute(args, "", "").await;
         assert!(result.error.is_some());
     }
-
-    // ── cron: missing action + enable/disable cycle ─────────────────
-
     #[tokio::test]
     async fn cron_missing_action_returns_error() {
         let tmp = TempDir::new().expect("tmp");
         let registry = ToolRegistry::new(tmp.path().to_path_buf(), true);
         let tool = registry.get("cron").expect("cron");
-
         let result = tool.execute(HashMap::new(), "", "").await;
         assert!(result.error.is_some());
         assert!(result.error.unwrap().contains("action"));
     }
-
     #[tokio::test]
     async fn cron_enable_disable_cycle() {
         let tmp = TempDir::new().expect("tmp");
         let ws = tmp.path().to_path_buf();
         let registry = ToolRegistry::new(ws.clone(), true);
         let tool = registry.get("cron").expect("cron");
-
-        // Add a job
         let mut add = HashMap::new();
         add.insert("action".to_string(), Value::String("add".to_string()));
         add.insert("message".to_string(), Value::String("tick".to_string()));
         add.insert("every".to_string(), Value::Number(120.into()));
         let add_res = tool.execute(add, "cli", "me").await;
         assert!(add_res.error.is_none(), "{:?}", add_res.error);
-
-        // Get the job id
         let jobs_path = ws.join("cron").join("jobs.json");
         let service = CronService::new(&jobs_path, None);
         let jobs = service.list_jobs(false);
         assert_eq!(jobs.len(), 1);
         let id = jobs[0].id.clone();
         assert!(jobs[0].enabled);
-
-        // Disable
         let mut dis = HashMap::new();
         dis.insert("action".to_string(), Value::String("disable".to_string()));
         dis.insert("id".to_string(), Value::String(id.clone()));
         let dis_res = tool.execute(dis, "cli", "me").await;
         assert!(dis_res.error.is_none());
-
         let service2 = CronService::new(&jobs_path, None);
         assert!(!service2.list_jobs(false)[0].enabled);
-
-        // Enable
         let mut en = HashMap::new();
         en.insert("action".to_string(), Value::String("enable".to_string()));
         en.insert("id".to_string(), Value::String(id));
         let en_res = tool.execute(en, "cli", "me").await;
         assert!(en_res.error.is_none());
-
         let service3 = CronService::new(&jobs_path, None);
         assert!(service3.list_jobs(false)[0].enabled);
     }
-
     #[tokio::test]
     async fn cron_remove_nonexistent_returns_error() {
         let tmp = TempDir::new().expect("tmp");
         let registry = ToolRegistry::new(tmp.path().to_path_buf(), true);
         let tool = registry.get("cron").expect("cron");
-
         let mut args = HashMap::new();
         args.insert("action".to_string(), Value::String("remove".to_string()));
         args.insert(
@@ -1464,45 +1272,31 @@ mod tests {
         assert!(result.error.is_some());
         assert!(result.error.unwrap().contains("not found"));
     }
-
-    // ── read_file: relative path resolves to workspace ──────────────
-
     #[tokio::test]
     async fn read_file_relative_path_resolves_to_workspace() {
         let tmp = TempDir::new().expect("tmp");
         std::fs::write(tmp.path().join("notes.md"), "# Notes").expect("write");
         let registry = ToolRegistry::new(tmp.path().to_path_buf(), true);
         let tool = registry.get("read_file").expect("tool");
-
         let mut args = HashMap::new();
         args.insert("path".to_string(), Value::String("notes.md".to_string()));
         let result = tool.execute(args, "", "").await;
         assert!(result.error.is_none(), "{:?}", result.error);
         assert_eq!(result.for_llm.as_deref(), Some("# Notes"));
     }
-
-    // ── web_search: empty string query ──────────────────────────────
-
     #[tokio::test]
     async fn web_search_empty_string_returns_error() {
         let tmp = TempDir::new().expect("tmp");
         let registry = ToolRegistry::new(tmp.path().to_path_buf(), true);
         let tool = registry.get("web_search").expect("tool");
-
         let mut args = HashMap::new();
         args.insert("query".to_string(), Value::String("".to_string()));
         let result = tool.execute(args, "", "").await;
         assert!(result.error.is_some());
     }
-
-    // ── web_search: real DDG fallback integration tests ─────────────
-    // These hit the real DDG endpoint. Mark #[ignore] so `cargo test`
-    // doesn't need network; run with `cargo test -- --ignored`.
-
     #[tokio::test]
-    #[ignore] // requires network
+    #[ignore]
     async fn web_search_ddg_returns_results() {
-        // Force DDG provider (no Brave key)
         let tool = WebSearchTool::from_config(&WebToolsConfig::default(), reqwest::Client::new());
         let mut args = HashMap::new();
         args.insert(
@@ -1527,16 +1321,14 @@ mod tests {
             "should have at least one numbered result: {}",
             text
         );
-        // Should contain a URL
         assert!(
             text.contains("http"),
             "results should contain URLs: {}",
             text
         );
     }
-
     #[tokio::test]
-    #[ignore] // requires network
+    #[ignore]
     async fn web_search_ddg_respects_count_limit() {
         let tool = WebSearchTool::from_config(&WebToolsConfig::default(), reqwest::Client::new());
         let mut args = HashMap::new();
@@ -1545,7 +1337,6 @@ mod tests {
         let result = tool.execute(args, "", "").await;
         assert!(result.error.is_none(), "{:?}", result.error);
         let text = result.for_llm.unwrap_or_default();
-        // Should have results 1. and 2. but NOT 3.
         assert!(text.contains("1."), "missing result 1");
         assert!(text.contains("2."), "missing result 2");
         assert!(
@@ -1554,9 +1345,8 @@ mod tests {
             text
         );
     }
-
     #[tokio::test]
-    #[ignore] // requires network
+    #[ignore]
     async fn web_search_ddg_decodes_redirect_urls() {
         let tool = WebSearchTool::from_config(&WebToolsConfig::default(), reqwest::Client::new());
         let mut args = HashMap::new();
@@ -1565,41 +1355,28 @@ mod tests {
         let result = tool.execute(args, "", "").await;
         assert!(result.error.is_none(), "{:?}", result.error);
         let text = result.for_llm.unwrap_or_default();
-        // DDG uses redirect URLs like /l/?uddg=... — after decoding
-        // they should be direct URLs (no "uddg=" in final output)
         assert!(
             !text.contains("uddg="),
             "URLs should be decoded, not raw DDG redirects: {}",
             text
         );
     }
-
-    // ── subagent: missing task returns error ─────────────────────────
-
     #[tokio::test]
     async fn subagent_missing_task_returns_error() {
         let tmp = TempDir::new().expect("tmp");
         let registry = ToolRegistry::new(tmp.path().to_path_buf(), true);
         let tool = registry.get("subagent").expect("tool");
-
         let result = tool.execute(HashMap::new(), "cli", "me").await;
         assert!(result.error.is_some());
     }
-
-    // ── spawn: missing task returns error ────────────────────────────
-
     #[tokio::test]
     async fn spawn_missing_task_returns_error() {
         let tmp = TempDir::new().expect("tmp");
         let registry = ToolRegistry::new(tmp.path().to_path_buf(), true);
         let tool = registry.get("spawn").expect("tool");
-
         let result = tool.execute(HashMap::new(), "cli", "me").await;
         assert!(result.error.is_some());
     }
-
-    // ── memory tool tests ───────────────────────────────────────────────
-
     #[tokio::test]
     async fn memory_read_empty_returns_placeholder() {
         let tmp = TempDir::new().expect("tmp");
@@ -1610,12 +1387,10 @@ mod tests {
         assert!(result.error.is_none(), "{:?}", result.error);
         assert_eq!(result.for_llm.as_deref(), Some("(memory is empty)"));
     }
-
     #[tokio::test]
     async fn memory_write_and_read_roundtrip() {
         let tmp = TempDir::new().expect("tmp");
         let tool = MemoryTool::new(tmp.path().to_path_buf());
-
         let mut write_args = HashMap::new();
         write_args.insert("action".to_string(), Value::String("write".to_string()));
         write_args.insert(
@@ -1624,29 +1399,24 @@ mod tests {
         );
         let wr = tool.execute(write_args, "", "").await;
         assert!(wr.error.is_none(), "{:?}", wr.error);
-
         let mut read_args = HashMap::new();
         read_args.insert("action".to_string(), Value::String("read".to_string()));
         let rd = tool.execute(read_args, "", "").await;
         assert!(rd.error.is_none());
         assert_eq!(rd.for_llm.as_deref(), Some("User prefers dark mode"));
     }
-
     #[tokio::test]
     async fn memory_append_accumulates() {
         let tmp = TempDir::new().expect("tmp");
         let tool = MemoryTool::new(tmp.path().to_path_buf());
-
         let mut a1 = HashMap::new();
         a1.insert("action".to_string(), Value::String("append".to_string()));
         a1.insert("content".to_string(), Value::String("fact-1".to_string()));
         tool.execute(a1, "", "").await;
-
         let mut a2 = HashMap::new();
         a2.insert("action".to_string(), Value::String("append".to_string()));
         a2.insert("content".to_string(), Value::String("fact-2".to_string()));
         tool.execute(a2, "", "").await;
-
         let mut rd = HashMap::new();
         rd.insert("action".to_string(), Value::String("read".to_string()));
         let result = tool.execute(rd, "", "").await;
@@ -1654,13 +1424,10 @@ mod tests {
         assert!(text.contains("fact-1"), "missing fact-1: {text}");
         assert!(text.contains("fact-2"), "missing fact-2: {text}");
     }
-
     #[tokio::test]
     async fn memory_daily_append_and_read() {
         let tmp = TempDir::new().expect("tmp");
         let tool = MemoryTool::new(tmp.path().to_path_buf());
-
-        // Empty daily
         let mut rd = HashMap::new();
         rd.insert(
             "action".to_string(),
@@ -1668,8 +1435,6 @@ mod tests {
         );
         let empty = tool.execute(rd, "", "").await;
         assert_eq!(empty.for_llm.as_deref(), Some("(no daily notes for today)"));
-
-        // Append daily
         let mut ap = HashMap::new();
         ap.insert(
             "action".to_string(),
@@ -1681,8 +1446,6 @@ mod tests {
         );
         let wr = tool.execute(ap, "", "").await;
         assert!(wr.error.is_none(), "{:?}", wr.error);
-
-        // Read back
         let mut rd2 = HashMap::new();
         rd2.insert(
             "action".to_string(),
@@ -1694,7 +1457,6 @@ mod tests {
             "daily notes should contain appended content"
         );
     }
-
     #[tokio::test]
     async fn memory_invalid_action_returns_error() {
         let tmp = TempDir::new().expect("tmp");
@@ -1705,7 +1467,6 @@ mod tests {
         assert!(result.error.is_some());
         assert!(result.error.unwrap().contains("Unknown action"));
     }
-
     #[tokio::test]
     async fn memory_missing_action_returns_error() {
         let tmp = TempDir::new().expect("tmp");

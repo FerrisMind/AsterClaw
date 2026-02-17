@@ -1,24 +1,15 @@
-//! Messaging tools: MessageTool, SpawnTool, SubagentTool.
-
-use std::collections::HashMap;
-use std::sync::Arc;
-
+use super::{SubagentManager, Tool, ToolResult, arg_string};
 use async_trait::async_trait;
 use parking_lot::RwLock;
 use serde_json::Value;
-
-use super::{SubagentManager, Tool, ToolResult, arg_string};
-
-// ── MessageTool ─────────────────────────────────────────────────────────
-
+use std::collections::HashMap;
+use std::sync::Arc;
 pub struct MessageTool;
-
 impl MessageTool {
     pub fn new() -> Self {
         Self
     }
 }
-
 #[async_trait]
 impl Tool for MessageTool {
     fn name(&self) -> &str {
@@ -38,7 +29,6 @@ impl Tool for MessageTool {
             "required": ["content"]
         })
     }
-
     async fn execute(
         &self,
         args: HashMap<String, Value>,
@@ -53,14 +43,12 @@ impl Tool for MessageTool {
             arg_string(&args, "channel").unwrap_or_else(|| current_channel.to_string());
         let requested_chat =
             arg_string(&args, "chat_id").unwrap_or_else(|| current_chat_id.to_string());
-
         if requested_channel != current_channel || requested_chat != current_chat_id {
             return ToolResult::error("cross-channel message routing is not supported in MVP");
         }
         if requested_channel.is_empty() || requested_chat.is_empty() {
             return ToolResult::error("no target channel/chat specified");
         }
-
         ToolResult {
             for_user: Some(content),
             for_llm: Some(format!(
@@ -72,19 +60,14 @@ impl Tool for MessageTool {
         }
     }
 }
-
-// ── SpawnTool ───────────────────────────────────────────────────────────
-
 pub struct SpawnTool {
     handle: Arc<RwLock<Option<Arc<SubagentManager>>>>,
 }
-
 impl SpawnTool {
     pub fn new(handle: Arc<RwLock<Option<Arc<SubagentManager>>>>) -> Self {
         Self { handle }
     }
 }
-
 #[async_trait]
 impl Tool for SpawnTool {
     fn name(&self) -> &str {
@@ -128,19 +111,14 @@ impl Tool for SpawnTool {
         }
     }
 }
-
-// ── SubagentTool ────────────────────────────────────────────────────────
-
 pub struct SubagentTool {
     handle: Arc<RwLock<Option<Arc<SubagentManager>>>>,
 }
-
 impl SubagentTool {
     pub fn new(handle: Arc<RwLock<Option<Arc<SubagentManager>>>>) -> Self {
         Self { handle }
     }
 }
-
 #[async_trait]
 impl Tool for SubagentTool {
     fn name(&self) -> &str {

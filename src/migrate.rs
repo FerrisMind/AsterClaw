@@ -1,10 +1,6 @@
-//! Migration utilities from legacy `.picoclaw` layout to `.asterclaw`.
-
+use crate::config::{Config, ProviderConfig};
 use anyhow::{Result, anyhow};
 use std::path::{Path, PathBuf};
-
-use crate::config::{Config, ProviderConfig};
-
 #[derive(Debug, Clone, Default)]
 pub struct MigrateResult {
     pub files_copied: usize,
@@ -13,7 +9,6 @@ pub struct MigrateResult {
     pub config_migrated: bool,
     pub warnings: Vec<String>,
 }
-
 pub fn migrate_from_openclaw(
     dry_run: bool,
     config_only: bool,
@@ -27,26 +22,21 @@ pub fn migrate_from_openclaw(
             "--config-only and --workspace-only cannot be used together"
         ));
     }
-
     let source_home = resolve_home(openclaw_home, ".picoclaw")?;
     let target_home = resolve_home(asterclaw_home, ".asterclaw")?;
     let mut result = MigrateResult::default();
-
     if !workspace_only {
         migrate_config(&source_home, &target_home, dry_run, &mut result)?;
     }
     if !config_only {
         migrate_workspace(&source_home, &target_home, dry_run, force, &mut result)?;
     }
-
     Ok(result)
 }
-
 fn resolve_home(override_path: Option<&str>, default_suffix: &str) -> Result<PathBuf> {
     if let Some(path) = override_path {
         return Ok(expand_home(path));
     }
-    // Respect ASTERCLAW_HOME override (consistent with config::resolve_home_dir).
     if let Ok(ph) = std::env::var("ASTERCLAW_HOME") {
         let trimmed = ph.trim();
         if !trimmed.is_empty() {
@@ -56,7 +46,6 @@ fn resolve_home(override_path: Option<&str>, default_suffix: &str) -> Result<Pat
     let home = dirs::home_dir().ok_or_else(|| anyhow!("Cannot resolve user home directory"))?;
     Ok(home.join(default_suffix))
 }
-
 fn expand_home(path: &str) -> PathBuf {
     if path == "~" {
         return dirs::home_dir().unwrap_or_else(|| PathBuf::from(path));
@@ -68,7 +57,6 @@ fn expand_home(path: &str) -> PathBuf {
     }
     PathBuf::from(path)
 }
-
 fn migrate_config(
     source_home: &Path,
     target_home: &Path,
@@ -84,16 +72,13 @@ fn migrate_config(
         .find(|p| p.exists())
         .cloned()
         .ok_or_else(|| anyhow!("legacy config not found in {}", source_home.display()))?;
-
     let source_cfg = load_legacy_config(&source_path)?;
     let target_path = target_home.join("config.json");
     let mut final_cfg = source_cfg;
-
     if target_path.exists() {
         let existing = crate::config::load_config(&target_path)?;
         final_cfg = merge_config(existing, final_cfg);
     }
-
     if !dry_run {
         std::fs::create_dir_all(target_home)?;
         crate::config::save_config(&target_path, &final_cfg)?;
@@ -101,7 +86,6 @@ fn migrate_config(
     result.config_migrated = true;
     Ok(())
 }
-
 fn load_legacy_config(path: &Path) -> Result<Config> {
     let raw = std::fs::read_to_string(path)?;
     let value: serde_json::Value = serde_json::from_str(&raw)?;
@@ -110,7 +94,6 @@ fn load_legacy_config(path: &Path) -> Result<Config> {
     rewrite_paths_for_asterclaw(&mut cfg);
     Ok(cfg)
 }
-
 fn normalize_keys(value: serde_json::Value) -> serde_json::Value {
     match value {
         serde_json::Value::Object(map) => {
@@ -126,7 +109,6 @@ fn normalize_keys(value: serde_json::Value) -> serde_json::Value {
         other => other,
     }
 }
-
 fn camel_to_snake(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let chars: Vec<char> = input.chars().collect();
@@ -149,7 +131,6 @@ fn camel_to_snake(input: &str) -> String {
     }
     out
 }
-
 fn rewrite_paths_for_asterclaw(cfg: &mut Config) {
     cfg.agents.defaults.workspace = cfg
         .agents
@@ -157,7 +138,6 @@ fn rewrite_paths_for_asterclaw(cfg: &mut Config) {
         .workspace
         .replace(".picoclaw", ".asterclaw");
 }
-
 fn merge_provider(dst: ProviderConfig, src: ProviderConfig) -> ProviderConfig {
     ProviderConfig {
         api_key: if is_empty_opt(&dst.api_key) {
@@ -187,11 +167,9 @@ fn merge_provider(dst: ProviderConfig, src: ProviderConfig) -> ProviderConfig {
         },
     }
 }
-
 fn is_empty_opt(v: &Option<String>) -> bool {
     v.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true)
 }
-
 fn merge_config(mut existing: Config, incoming: Config) -> Config {
     if existing.agents.defaults.provider.trim().is_empty() {
         existing.agents.defaults.provider = incoming.agents.defaults.provider;
@@ -202,7 +180,6 @@ fn merge_config(mut existing: Config, incoming: Config) -> Config {
     if existing.agents.defaults.workspace.trim().is_empty() {
         existing.agents.defaults.workspace = incoming.agents.defaults.workspace;
     }
-
     existing.providers.anthropic =
         merge_provider(existing.providers.anthropic, incoming.providers.anthropic);
     existing.providers.openai =
@@ -213,14 +190,11 @@ fn merge_config(mut existing: Config, incoming: Config) -> Config {
     existing.providers.zhipu = merge_provider(existing.providers.zhipu, incoming.providers.zhipu);
     existing.providers.deepseek =
         merge_provider(existing.providers.deepseek, incoming.providers.deepseek);
-
     if !existing.channels.telegram.enabled && incoming.channels.telegram.enabled {
         existing.channels.telegram = incoming.channels.telegram;
     }
-
     existing
 }
-
 fn migrate_workspace(
     source_home: &Path,
     target_home: &Path,
@@ -236,7 +210,6 @@ fn migrate_workspace(
         ));
         return Ok(());
     }
-
     let target_workspace = target_home.join("workspace");
     let migrate_dirs = ["memory", "skills"];
     let migrate_files = [
@@ -246,7 +219,6 @@ fn migrate_workspace(
         "HEARTBEAT.md",
         "TOOLS.md",
     ];
-
     for dir in migrate_dirs {
         copy_tree(
             &source_workspace.join(dir),
@@ -267,7 +239,6 @@ fn migrate_workspace(
     }
     Ok(())
 }
-
 fn copy_tree(
     source_root: &Path,
     target_root: &Path,
@@ -297,7 +268,6 @@ fn copy_tree(
     }
     Ok(())
 }
-
 fn copy_file_with_backup(
     source: &Path,
     destination: &Path,
@@ -308,7 +278,6 @@ fn copy_file_with_backup(
     if !source.exists() {
         return Ok(());
     }
-
     if destination.exists() {
         if !force {
             result.files_skipped += 1;
@@ -330,7 +299,6 @@ fn copy_file_with_backup(
         }
         result.backups_created += 1;
     }
-
     if !dry_run {
         if let Some(parent) = destination.parent() {
             std::fs::create_dir_all(parent)?;
@@ -340,11 +308,9 @@ fn copy_file_with_backup(
     result.files_copied += 1;
     Ok(())
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn camel_case_normalization_works() {
         let raw = serde_json::json!({
@@ -357,16 +323,13 @@ mod tests {
         let normalized = normalize_keys(raw);
         assert_eq!(normalized["agents"]["defaults"]["max_tool_iterations"], 7);
     }
-
     #[test]
     fn merge_keeps_existing_non_empty_fields() {
         let mut existing = Config::default();
         existing.providers.openai.api_key = Some("existing".to_string());
-
         let mut incoming = Config::default();
         incoming.providers.openai.api_key = Some("incoming".to_string());
         incoming.providers.deepseek.api_key = Some("new-deepseek".to_string());
-
         let merged = merge_config(existing, incoming);
         assert_eq!(merged.providers.openai.api_key.as_deref(), Some("existing"));
         assert_eq!(
@@ -374,12 +337,10 @@ mod tests {
             Some("new-deepseek")
         );
     }
-
     #[test]
     fn dry_run_does_not_create_target_files() {
         let src_home = tempfile::tempdir().expect("src temp");
         let dst_home = tempfile::tempdir().expect("dst temp");
-
         std::fs::create_dir_all(src_home.path().join("workspace/memory")).expect("mkdir");
         std::fs::write(
             src_home.path().join("workspace/memory/MEMORY.md"),
@@ -387,7 +348,6 @@ mod tests {
         )
         .expect("write");
         std::fs::write(src_home.path().join("config.json"), "{}").expect("cfg");
-
         let res = migrate_from_openclaw(
             true,
             false,
@@ -397,7 +357,6 @@ mod tests {
             Some(dst_home.path().to_str().expect("dst path")),
         )
         .expect("migrate");
-
         assert!(res.config_migrated);
         assert!(!dst_home.path().join("workspace/memory/MEMORY.md").exists());
         assert!(!dst_home.path().join("config.json").exists());

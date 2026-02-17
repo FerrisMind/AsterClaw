@@ -1,26 +1,18 @@
-//! Cron job management tool.
-
-use std::collections::HashMap;
-use std::sync::Arc;
-
+use super::{Tool, ToolResult, arg_i64, arg_string};
+use crate::cron::{CronService, Schedule};
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use serde_json::Value;
-
-use crate::cron::{CronService, Schedule};
-
-use super::{Tool, ToolResult, arg_i64, arg_string};
-
+use std::collections::HashMap;
+use std::sync::Arc;
 pub struct CronTool {
     service: Arc<Mutex<CronService>>,
 }
-
 impl CronTool {
     pub fn new(service: Arc<Mutex<CronService>>) -> Self {
         Self { service }
     }
 }
-
 #[async_trait]
 impl Tool for CronTool {
     fn name(&self) -> &str {
@@ -83,7 +75,6 @@ impl Tool for CronTool {
             Some(v) if !v.is_empty() => v.to_lowercase(),
             _ => return ToolResult::error("action is required"),
         };
-
         match action.as_str() {
             "list" => self.list_jobs(),
             "add" => self.add_job(&args, channel, chat_id),
@@ -94,7 +85,6 @@ impl Tool for CronTool {
         }
     }
 }
-
 impl CronTool {
     fn list_jobs(&self) -> ToolResult {
         let service = self.service.lock();
@@ -144,16 +134,12 @@ impl CronTool {
             error: None,
         }
     }
-
     fn add_job(&self, args: &HashMap<String, Value>, channel: &str, chat_id: &str) -> ToolResult {
         let message = match arg_string(args, "message") {
             Some(v) if !v.trim().is_empty() => v,
             _ => return ToolResult::error("message is required for add"),
         };
-
         let now_ms = chrono::Utc::now().timestamp_millis();
-
-        // Determine schedule: at_seconds > every_seconds > cron_expr
         let schedule = if let Some(at_secs) = arg_i64(args, "at_seconds") {
             if at_secs < 1 {
                 return ToolResult::error("at_seconds must be >= 1");
@@ -165,14 +151,13 @@ impl CronTool {
             if every < 1 {
                 return ToolResult::error("every_seconds must be >= 1");
             }
-            Schedule::Every(every as u64 * 1000) // Convert to milliseconds
+            Schedule::Every(every as u64 * 1000)
         } else if let Some(expr) =
             arg_string(args, "cron_expr").or_else(|| arg_string(args, "cron"))
         {
             if expr.trim().is_empty() {
                 return ToolResult::error("cron expression cannot be empty");
             }
-            // Validate the expression
             if expr.parse::<cron::Schedule>().is_err() {
                 return ToolResult::error(&format!(
                     "invalid cron expression: '{}'. Use 6-field format: sec min hour day month weekday",
@@ -183,16 +168,13 @@ impl CronTool {
         } else {
             return ToolResult::error("one of at_seconds, every_seconds, or cron_expr is required");
         };
-
         let name = arg_string(args, "name")
             .filter(|n| !n.trim().is_empty())
             .unwrap_or_else(|| message.chars().take(30).collect());
-
         let deliver = args
             .get("deliver")
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
-
         let ch = if !channel.is_empty() {
             Some(channel)
         } else {
@@ -203,7 +185,6 @@ impl CronTool {
         } else {
             None
         };
-
         match self
             .service
             .lock()
@@ -231,7 +212,6 @@ impl CronTool {
             Err(e) => ToolResult::error(&format!("failed to add cron job: {}", e)),
         }
     }
-
     fn remove_job(&self, args: &HashMap<String, Value>) -> ToolResult {
         let id = match arg_string(args, "job_id").or_else(|| arg_string(args, "id")) {
             Some(v) if !v.trim().is_empty() => v,
@@ -247,7 +227,6 @@ impl CronTool {
             error: None,
         }
     }
-
     fn toggle_job(&self, args: &HashMap<String, Value>, enable: bool) -> ToolResult {
         let id = match arg_string(args, "job_id").or_else(|| arg_string(args, "id")) {
             Some(v) if !v.trim().is_empty() => v,

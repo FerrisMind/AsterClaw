@@ -1,16 +1,10 @@
-//! Hardware device tools: I2C and SPI (Linux only).
-
-use std::collections::HashMap;
-use std::process::Command;
-
+use super::{Tool, ToolResult, arg_i64, arg_string};
 use async_trait::async_trait;
 use serde_json::Value;
-
-use super::{Tool, ToolResult, arg_i64, arg_string};
-
+use std::collections::HashMap;
+use std::process::Command;
 pub struct I2cTool;
 pub struct SpiTool;
-
 #[async_trait]
 impl Tool for I2cTool {
     fn name(&self) -> &str {
@@ -169,7 +163,6 @@ impl Tool for I2cTool {
         }
     }
 }
-
 #[async_trait]
 impl Tool for SpiTool {
     fn name(&self) -> &str {

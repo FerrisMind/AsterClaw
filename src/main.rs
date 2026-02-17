@@ -1,6 +1,3 @@
-//! AsterClaw - Ultra-lightweight personal AI agent
-//! Rust port from Go version
-
 mod agent;
 mod auth;
 mod bus;
@@ -21,12 +18,10 @@ mod skills;
 mod state;
 mod tools;
 mod voice;
-
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::env;
 use std::sync::Arc;
-
 const BANNER: &str = r#"
    █████████         █████                         █████████  ████                          
   ███░░░░░███       ░░███                         ███░░░░░███░░███                          
@@ -36,9 +31,7 @@ const BANNER: &str = r#"
  ░███    ░███ ░░░░███░███ ███░███░░░   ░███     ░░███     ███ ░███  ███░░███ ░░███████████  
  █████   ███████████ ░░█████ ░░██████  █████     ░░█████████  █████░░████████ ░░████░████   
 ░░░░░   ░░░░░░░░░░░   ░░░░░   ░░░░░░  ░░░░░       ░░░░░░░░░  ░░░░░  ░░░░░░░░   ░░░░ ░░░░    
-                                                                                                                                                                                    
 "#;
-
 #[derive(Parser, Debug)]
 #[command(name = "AsterClaw")]
 #[command(about = "Ultra-lightweight personal AI assistant in Rust")]
@@ -48,7 +41,6 @@ struct Cli {
     #[arg(short, long)]
     debug: bool,
 }
-
 #[derive(Subcommand, Debug)]
 enum Commands {
     Onboard,
@@ -87,7 +79,6 @@ enum Commands {
     },
     Version,
 }
-
 #[derive(Subcommand, Debug)]
 enum CronCommands {
     List {
@@ -120,7 +111,6 @@ enum CronCommands {
         id: String,
     },
 }
-
 #[derive(Subcommand, Debug)]
 enum AuthCommands {
     Login {
@@ -137,7 +127,6 @@ enum AuthCommands {
     },
     Status,
 }
-
 #[derive(Subcommand, Debug)]
 enum SkillsCommands {
     List,
@@ -146,7 +135,6 @@ enum SkillsCommands {
     Search,
     Show { name: String },
 }
-
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let log_level = if cli.debug {
@@ -155,7 +143,6 @@ fn main() -> Result<()> {
         tracing::Level::INFO
     };
     logger::init(log_level)?;
-
     match cli.command {
         Commands::Onboard => onboard(),
         Commands::Agent { message, session } => agent_cmd(message, session),
@@ -177,7 +164,6 @@ fn main() -> Result<()> {
         Commands::Skills { command } => skills_cmd(command),
     }
 }
-
 fn build_runtime(runtime_cfg: &config::RuntimeConfig) -> Result<tokio::runtime::Runtime> {
     let worker_threads = runtime_cfg.worker_threads.max(1);
     let max_blocking_threads = runtime_cfg.max_blocking_threads.max(worker_threads);
@@ -188,10 +174,8 @@ fn build_runtime(runtime_cfg: &config::RuntimeConfig) -> Result<tokio::runtime::
         .build()
         .map_err(Into::into)
 }
-
 fn onboard() -> Result<()> {
     let config_path = config::get_config_path()?;
-
     if config_path.exists() {
         print!(
             "Config already exists at {}. Overwrite? (y/n): ",
@@ -204,148 +188,100 @@ fn onboard() -> Result<()> {
             return Ok(());
         }
     }
-
     let cfg = config::Config::default();
     config::save_config(&config_path, &cfg)?;
-
-    // Create workspace templates
     let workspace = cfg.workspace_path();
     create_workspace_templates(&workspace)?;
-
     println!("AsterClaw is ready!");
     println!("\nNext steps:");
     println!("  1. Add your API key to {}", config_path.display());
     println!("     Get one at: https://openrouter.ai/keys");
     println!("  2. Chat: asterclaw agent -m \"Hello!\"");
-
     Ok(())
 }
-
 fn create_workspace_templates(workspace: &std::path::Path) -> Result<()> {
     use std::fs;
-
-    // Create necessary directories
     let dirs = ["memory", "cron", "agents", "data"];
-
     for dir in dirs {
         let path = workspace.join(dir);
         fs::create_dir_all(path)?;
     }
-
-    // Create default memory file
     let memory_file = workspace.join("memory/MEMORY.md");
     if !memory_file.exists() {
         fs::write(memory_file, "# Memory\n\nPersonal notes and memories.\n")?;
     }
-
     Ok(())
 }
-
 fn agent_cmd(message: Option<String>, session: Option<String>) -> Result<()> {
     let config_path = config::get_config_path()?;
     let config = config::load_config(&config_path)?;
-
-    // Create provider
     let provider = providers::create_provider(&config)?;
-
-    // Create message bus (wrap in Arc)
     let msg_bus = Arc::new(bus::MessageBus::new());
-
-    // Create agent loop
     let agent_loop = Arc::new(agent::AgentLoop::new(&config, &msg_bus, provider.clone()));
-
     println!("Agent initialized");
     println!(
         "  Tools: {} loaded",
         agent_loop.get_startup_info()["tools"]["count"]
     );
-
     let session_key = session.unwrap_or_else(|| "cli:default".to_string());
     let runtime = build_runtime(&config.runtime)?;
-
     if let Some(msg) = message {
-        // Single message mode
         let response =
             runtime.block_on(async { agent_loop.process_direct(&msg, &session_key).await })?;
-
         println!("\n{}", response);
     } else {
-        // Interactive mode
         println!("Interactive mode (Ctrl+C to exit)\n");
         interactive_mode(&agent_loop, &session_key, &runtime)?;
     }
-
     Ok(())
 }
-
 fn interactive_mode(
     agent_loop: &Arc<agent::AgentLoop>,
     session_key: &str,
     runtime: &tokio::runtime::Runtime,
 ) -> Result<()> {
     use std::io::{self, Write};
-
     loop {
         print!("You: ");
         io::stdout().flush()?;
-
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
-
         let input = input.trim();
         if input.is_empty() {
             continue;
         }
-
         if input == "exit" || input == "quit" {
             println!("Goodbye!");
             break;
         }
-
         let response =
             runtime.block_on(async { agent_loop.process_direct(input, session_key).await });
-
         match response {
             Ok(resp) => println!("\n{}\n", resp),
             Err(e) => println!("Error: {}", e),
         }
     }
-
     Ok(())
 }
-
 fn gateway_cmd(_debug: bool) -> Result<()> {
     let config_path = config::get_config_path()?;
     let config = config::load_config(&config_path)?;
-
-    // Create provider
     let provider = providers::create_provider(&config)?;
-
-    // Create message bus (wrap in Arc)
     let msg_bus = Arc::new(bus::MessageBus::new());
-
-    // Create agent loop
     let agent_loop = Arc::new(agent::AgentLoop::new(&config, &msg_bus, provider.clone()));
-
     print!("{}", BANNER);
     println!("  v{}\n", env!("CARGO_PKG_VERSION"));
-
-    // Print status
     println!("📦 Agent Status:");
     let startup_info = agent_loop.get_startup_info();
     println!("  • Tools: {} loaded", startup_info["tools"]["count"]);
-
-    // Create channel manager - get enabled channels BEFORE moving
     let channel_manager = Arc::new(channels::ChannelManager::new(&config, &msg_bus)?);
     let enabled_channels = channel_manager.get_enabled_channels();
     agent_loop.set_channel_manager(channel_manager.clone());
-
     if !enabled_channels.is_empty() {
         println!("✓ Channels enabled: {}", enabled_channels.join(", "));
     } else {
         println!("⚠ Warning: No channels enabled");
     }
-
     println!(
         "✓ Gateway started on {}:{}",
         config.gateway.host, config.gateway.port
@@ -353,12 +289,10 @@ fn gateway_cmd(_debug: bool) -> Result<()> {
     println!("Press Ctrl+C to stop");
     let runtime = build_runtime(&config.runtime)?;
     runtime.block_on(async move {
-        // Start cron runner using the shared service from agent's tool registry
         let cron_service = agent_loop.cron_service();
         let cron_runner = Arc::new(cron::CronRunner::new(cron_service, msg_bus.clone()));
         cron_runner.start();
         println!("✓ Cron scheduler started");
-
         let heartbeat_service = heartbeat::HeartbeatService::new(
             config.workspace_path(),
             config.heartbeat.interval as u64,
@@ -366,7 +300,6 @@ fn gateway_cmd(_debug: bool) -> Result<()> {
         );
         heartbeat_service.set_bus(&msg_bus);
         heartbeat_service.start()?;
-
         let mut devices_service = devices::Service::new(
             devices::Config {
                 enabled: config.devices.enabled,
@@ -376,16 +309,13 @@ fn gateway_cmd(_debug: bool) -> Result<()> {
         );
         devices_service.set_bus(msg_bus.clone());
         devices_service.start().await?;
-
         channel_manager.start_all().await?;
-
         let health_server = health::HealthServer::new(&config.gateway.host, config.gateway.port);
         health_server.start().await?;
         println!(
             "✓ Health endpoints available at http://{}:{}/health and /ready",
             config.gateway.host, config.gateway.port
         );
-
         let agent_task = tokio::spawn({
             let agent_loop = agent_loop.clone();
             async move {
@@ -394,7 +324,6 @@ fn gateway_cmd(_debug: bool) -> Result<()> {
                 }
             }
         });
-
         tokio::signal::ctrl_c().await?;
         println!("\nShutting down...");
         agent_loop.stop();
@@ -408,18 +337,14 @@ fn gateway_cmd(_debug: bool) -> Result<()> {
         println!("✓ Gateway stopped");
         Ok::<(), anyhow::Error>(())
     })?;
-
     Ok(())
 }
-
 fn status_cmd() -> Result<()> {
     let config_path = config::get_config_path()?;
     let legacy_path = config::get_legacy_config_path()?;
-
     println!("AsterClaw Status");
     println!("Version: {}", env!("CARGO_PKG_VERSION"));
     println!();
-
     if config_path.exists() || legacy_path.exists() {
         let active = if config_path.exists() {
             config_path.clone()
@@ -427,25 +352,19 @@ fn status_cmd() -> Result<()> {
             legacy_path.clone()
         };
         println!("Config: {} ✓", active.display());
-
         let config = config::load_config(&active)?;
         let workspace = config.workspace_path();
-
         println!(
             "Workspace: {} {}",
             workspace.display(),
             if workspace.exists() { "✓" } else { "✗" }
         );
-
         println!("Model: {}", config.agents.defaults.model);
-
-        // Show provider status
         let has_openrouter = config.providers.openrouter.api_key.is_some();
         let has_anthropic = config.providers.anthropic.api_key.is_some();
         let has_openai = config.providers.openai.api_key.is_some();
         let has_zhipu = config.providers.zhipu.api_key.is_some();
         let has_groq = config.providers.groq.api_key.is_some();
-
         println!(
             "OpenRouter API: {}",
             if has_openrouter { "✓" } else { "not set" }
@@ -461,16 +380,13 @@ fn status_cmd() -> Result<()> {
         println!("Config: {} ✗", config_path.display());
         println!("\nRun 'asterclaw onboard' to initialize.");
     }
-
     Ok(())
 }
-
 fn cron_cmd(command: Option<CronCommands>) -> Result<()> {
     let config_path = config::get_config_path()?;
     let config = config::load_config(&config_path)?;
     let cron_store_path = config.workspace_path().join("cron/jobs.json");
     let mut service = cron::CronService::new(&cron_store_path, Some(&config));
-
     match command {
         Some(CronCommands::List { enabled_only }) => {
             let jobs = service.list_jobs(enabled_only);
@@ -478,7 +394,6 @@ fn cron_cmd(command: Option<CronCommands>) -> Result<()> {
                 println!("No scheduled jobs.");
                 return Ok(());
             }
-
             println!("\nScheduled Jobs:");
             for job in jobs {
                 println!("  {} - {}", job.name, job.id);
@@ -515,13 +430,12 @@ fn cron_cmd(command: Option<CronCommands>) -> Result<()> {
                     ));
                 }
             };
-
             let job = service.add_job(
                 &name,
                 schedule,
                 &message,
                 enabled,
-                true, // deliver directly
+                true,
                 channel.as_deref(),
                 chat_id.as_deref(),
             )?;
@@ -559,10 +473,8 @@ fn cron_cmd(command: Option<CronCommands>) -> Result<()> {
             println!("  asterclaw cron disable <id>");
         }
     }
-
     Ok(())
 }
-
 fn schedule_display(schedule: &cron::Schedule) -> String {
     match schedule {
         cron::Schedule::At(ms) => chrono::DateTime::from_timestamp_millis(*ms)
@@ -581,11 +493,9 @@ fn schedule_display(schedule: &cron::Schedule) -> String {
         cron::Schedule::Cron(expr) => format!("cron {}", expr),
     }
 }
-
 fn migrate_cmd(dry_run: bool, config_only: bool, workspace_only: bool, force: bool) -> Result<()> {
     let result =
         migrate::migrate_from_openclaw(dry_run, config_only, workspace_only, force, None, None)?;
-
     println!("Migration summary:");
     println!("  Config migrated: {}", result.config_migrated);
     println!("  Files copied: {}", result.files_copied);
@@ -597,10 +507,8 @@ fn migrate_cmd(dry_run: bool, config_only: bool, workspace_only: bool, force: bo
             println!("  - {}", warning);
         }
     }
-
     Ok(())
 }
-
 fn auth_cmd(command: Option<AuthCommands>) -> Result<()> {
     match command {
         Some(AuthCommands::Login {
@@ -640,14 +548,12 @@ fn auth_cmd(command: Option<AuthCommands>) -> Result<()> {
     }
     Ok(())
 }
-
 fn skills_cmd(command: Option<SkillsCommands>) -> Result<()> {
     let cfg_path = config::get_config_path()?;
     let cfg = config::load_config(&cfg_path)?;
     let workspace = cfg.workspace_path();
     let loader = skills::SkillsLoader::new(&workspace);
     let installer = skills::SkillInstaller::new(&workspace);
-
     match command {
         Some(SkillsCommands::List) => {
             let skills = loader.list_skills();

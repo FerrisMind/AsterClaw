@@ -1,11 +1,8 @@
-//! System prompt and message context builder.
-
 use crate::memory::MemoryStore;
 use crate::providers::Message;
 use crate::skills::SkillsLoader;
 use once_cell::sync::OnceCell;
 use std::path::PathBuf;
-
 pub struct ContextBuilder {
     workspace: PathBuf,
     skills_loader: SkillsLoader,
@@ -13,7 +10,6 @@ pub struct ContextBuilder {
     cached_bootstrap: OnceCell<String>,
     cached_skills_summary: OnceCell<String>,
 }
-
 impl ContextBuilder {
     pub fn new(workspace: PathBuf) -> Self {
         let skills_loader = SkillsLoader::new(&workspace);
@@ -26,7 +22,6 @@ impl ContextBuilder {
             cached_skills_summary: OnceCell::new(),
         }
     }
-
     pub fn get_skills_info(&self) -> serde_json::Value {
         let skills = self.skills_loader.list_skills();
         serde_json::json!({
@@ -35,39 +30,32 @@ impl ContextBuilder {
             "names": skills.into_iter().map(|s| s.name).collect::<Vec<_>>()
         })
     }
-
     pub fn build_messages(
         &self,
         mut history: Vec<Message>,
         summary: String,
         current_message: &str,
         channel: &str,
-        chat_id: &str,
         tool_summaries: &[String],
     ) -> Vec<Message> {
         let mut messages = Vec::new();
-        let mut system_prompt = self.build_system_prompt(channel, chat_id, tool_summaries);
+        let mut system_prompt = self.build_system_prompt(channel, tool_summaries);
         if !summary.is_empty() {
             system_prompt.push_str("\n\n## Summary of Previous Conversation\n\n");
             system_prompt.push_str(&summary);
         }
-
-        // Avoid starting with orphan tool messages.
         let orphan_count = history.iter().take_while(|m| m.role == "tool").count();
         if orphan_count > 0 {
             history.drain(..orphan_count);
         }
-
         messages.push(Message::system(&system_prompt));
         messages.extend(history);
         messages.push(Message::user(current_message));
         messages
     }
-
     pub fn build_system_prompt(
         &self,
         channel: &str,
-        chat_id: &str,
         tool_summaries: &[String],
     ) -> String {
         let now = chrono::Local::now().format("%Y-%m-%d %H:%M (%A)");
@@ -77,7 +65,6 @@ impl ContextBuilder {
             std::env::consts::ARCH,
             env!("CARGO_PKG_VERSION")
         );
-
         let channel_instructions = match channel {
             "telegram" => concat!(
                 "\n\n## Channel\nYou are responding in **Telegram**.\n\n",
@@ -97,7 +84,6 @@ impl ContextBuilder {
             "cli" => "\n\n## Channel\nYou are responding in the CLI terminal. Use standard Markdown formatting.".to_string(),
             _ => format!("\n\n## Channel\nYou are responding via the '{}' channel.", channel),
         };
-
         let mut prompt = format!(
             concat!(
                 "# AsterClaw\n\nYou are AsterClaw, a helpful AI assistant.{}\n\n",
@@ -126,13 +112,11 @@ impl ContextBuilder {
             self.workspace.display(),
             self.workspace.display(),
         );
-
         let tools_section = self.build_tools_section(tool_summaries);
         if !tools_section.is_empty() {
             prompt.push_str("\n\n---\n\n");
             prompt.push_str(&tools_section);
         }
-
         let bootstrap = self
             .cached_bootstrap
             .get_or_init(|| self.load_bootstrap_files());
@@ -140,7 +124,6 @@ impl ContextBuilder {
             prompt.push_str("\n\n---\n\n");
             prompt.push_str(bootstrap);
         }
-
         let skills_summary = self
             .cached_skills_summary
             .get_or_init(|| self.skills_loader.build_skills_summary_xml());
@@ -151,27 +134,22 @@ impl ContextBuilder {
                 skills_summary
             ));
         }
-
         let memory_context = self.memory.get_memory_context();
         if !memory_context.is_empty() {
             prompt.push_str("\n\n---\n\n");
             prompt.push_str(&memory_context);
         }
-
         prompt.push_str("\n\n---\n\n");
         prompt.push_str("## Important Rules\n\n1. **ALWAYS use tools** - When you need to perform an action, you MUST call the appropriate tool.\n2. **Be helpful and accurate** - Briefly explain tool actions.\n3. **Memory** - Write persistent facts to memory/MEMORY.md");
-
-        if !channel.is_empty() && !chat_id.is_empty() {
+        if !channel.is_empty() {
             prompt.push_str("\n\n---\n\n");
             prompt.push_str(&format!(
-                "## Current Session\nChannel: {}\nChat ID: {}",
-                channel, chat_id
+                "## Current Session\nChannel: {}",
+                channel
             ));
         }
-
         prompt
     }
-
     fn build_tools_section(&self, tool_summaries: &[String]) -> String {
         if tool_summaries.is_empty() {
             return String::new();
@@ -182,7 +160,6 @@ impl ContextBuilder {
             out.push_str(line);
             out.push('\n');
         }
-        // Web research workflow guidance
         out.push_str(concat!(
             "\n### Web Research Workflow\n\n",
             "When you need current or external information, follow this pattern:\n",
@@ -195,7 +172,6 @@ impl ContextBuilder {
         ));
         out
     }
-
     fn load_bootstrap_files(&self) -> String {
         let files = ["AGENTS.md", "SOUL.md", "USER.md", "IDENTITY.md"];
         let mut out = String::new();
@@ -210,11 +186,9 @@ impl ContextBuilder {
         out.trim().to_string()
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::ContextBuilder;
-
     #[test]
     fn system_prompt_contains_skills_memory_and_tools() {
         let tmp = tempfile::tempdir().expect("tmp");
@@ -228,7 +202,6 @@ mod tests {
         std::fs::create_dir_all(ws.join("memory")).expect("mkdir");
         std::fs::write(ws.join("memory/MEMORY.md"), "remember").expect("write memory");
         std::fs::write(ws.join("AGENTS.md"), "agents cfg").expect("write bootstrap");
-
         let cb = ContextBuilder::new(ws.clone());
         let prompt = cb.build_system_prompt("telegram", "123", &["- tool a".to_string()]);
         assert!(prompt.contains("<skills>"));
