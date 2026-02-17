@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: read
+  pages: write
+  id-token: write
 
 concurrency:
   group: pages
@@ -15,6 +17,10 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,13 +34,27 @@ jobs:
       - name: Install mdBook
         run: cargo install mdbook --locked
 
-      - name: Build docs
+      - name: Build English (default)
         run: mdbook build docs
+
+      - name: Build Russian
+        run: mdbook build docs --config docs/book.ru.toml
+
+      - name: Build Portuguese
+        run: mdbook build docs --config docs/book.pt-br.toml
+
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          cp docs/index.html _site/
+          cp -r docs/book/ru _site/ru
+          cp -r docs/book/en _site/en
+          cp -r docs/book/pt-br _site/pt-br
 
       - name: Upload pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: docs/book
+          path: _site
 
   deploy:
     needs: build

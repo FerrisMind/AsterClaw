@@ -1,17 +1,19 @@
 [book]
-title = "AsterClaw Documentation"
+title = "AsterClaw — Documentation"
 authors = ["FerrisMind"]
-language = "ru"
-src = "src"
+language = "en"
+src = "src/en"
 
 [build]
-build-dir = "book"
+build-dir = "book/en"
 
 [output.html]
 default-theme = "navy"
 preferred-dark-theme = "navy"
 git-repository-url = "https://github.com/FerrisMind/AsterClaw"
 edit-url-template = "https://github.com/FerrisMind/AsterClaw/edit/main/docs/{path}"
+additional-js = ["lang-switcher.js"]
+additional-css = ["lang-switcher.css"]
 
 [output.html.fold]
 enable = true
