@@ -38,10 +38,18 @@ jobs:
         run: mdbook build docs
 
       - name: Build Russian
-        run: mdbook build docs --config docs/book.ru.toml
+        run: |
+          cp docs/book.toml docs/book.en.bak
+          cp docs/book.ru.toml docs/book.toml
+          mdbook build docs
+          mv docs/book.en.bak docs/book.toml
 
       - name: Build Portuguese
-        run: mdbook build docs --config docs/book.pt-br.toml
+        run: |
+          cp docs/book.toml docs/book.en.bak
+          cp docs/book.pt-br.toml docs/book.toml
+          mdbook build docs
+          mv docs/book.en.bak docs/book.toml
 
       - name: Assemble site
         run: |
