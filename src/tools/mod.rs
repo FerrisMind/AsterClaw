@@ -4,6 +4,7 @@ mod cron_tool;
 mod device;
 mod exec;
 mod fs;
+mod memory_tool;
 mod messaging;
 mod web;
 
@@ -25,6 +26,7 @@ pub use cron_tool::CronTool;
 pub use device::{I2cTool, SpiTool};
 pub use exec::ExecTool;
 pub use fs::{AppendFileTool, EditFileTool, ListDirTool, ReadFileTool, WriteFileTool};
+pub use memory_tool::MemoryTool;
 pub use messaging::{MessageTool, SpawnTool, SubagentTool};
 pub use web::{WebFetchTool, WebSearchTool};
 
@@ -287,11 +289,6 @@ impl ToolResult {
         }
     }
 
-    pub fn with_for_user(mut self, msg: &str) -> Self {
-        self.for_user = Some(msg.to_string());
-        self
-    }
-
     pub fn with_for_llm(mut self, msg: &str) -> Self {
         self.for_llm = Some(msg.to_string());
         self
@@ -323,6 +320,7 @@ pub struct ToolRegistry {
     tools: HashMap<String, Arc<dyn Tool>>,
     subagent_manager: Arc<RwLock<Option<Arc<SubagentManager>>>>,
     web_config: WebToolsConfig,
+    cron_service: Arc<parking_lot::Mutex<crate::cron::CronService>>,
 }
 
 impl ToolRegistry {
@@ -336,15 +334,33 @@ impl ToolRegistry {
         restrict_to_workspace: bool,
         web_config: WebToolsConfig,
     ) -> Self {
+        let cron_path = workspace.join("cron").join("jobs.json");
+        let cron_service = Arc::new(parking_lot::Mutex::new(crate::cron::CronService::new(
+            &cron_path, None,
+        )));
+        Self::with_cron_service(workspace, restrict_to_workspace, web_config, cron_service)
+    }
+
+    pub fn with_cron_service(
+        workspace: PathBuf,
+        restrict_to_workspace: bool,
+        web_config: WebToolsConfig,
+        cron_service: Arc<parking_lot::Mutex<crate::cron::CronService>>,
+    ) -> Self {
         let mut registry = Self {
             workspace,
             restrict_to_workspace,
             tools: HashMap::new(),
             subagent_manager: Arc::new(RwLock::new(None)),
             web_config,
+            cron_service,
         };
         registry.register_builtin_tools();
         registry
+    }
+
+    pub fn cron_service(&self) -> Arc<parking_lot::Mutex<crate::cron::CronService>> {
+        self.cron_service.clone()
     }
 
     fn register_builtin_tools(&mut self) {
@@ -377,7 +393,8 @@ impl ToolRegistry {
         // I2C/SPI return runtime errors on non-Linux; always register for discoverability.
         self.register(I2cTool);
         self.register(SpiTool);
-        self.register(CronTool::new(self.workspace.clone()));
+        self.register(CronTool::new(self.cron_service.clone()));
+        self.register(MemoryTool::new(self.workspace.clone()));
     }
 
     pub fn register<T: Tool + 'static>(&mut self, tool: T) {
@@ -994,7 +1011,7 @@ mod tests {
     // ── registry meta tests ─────────────────────────────────────────────
 
     #[tokio::test]
-    async fn all_14_tools_are_registered() {
+    async fn all_15_tools_are_registered() {
         let tmp = TempDir::new().expect("tmp");
         let registry = ToolRegistry::new(tmp.path().to_path_buf(), true);
         let names = registry.list_names();
@@ -1005,6 +1022,7 @@ mod tests {
             "exec",
             "i2c",
             "list_dir",
+            "memory",
             "message",
             "read_file",
             "spawn",
@@ -1015,7 +1033,7 @@ mod tests {
             "write_file",
         ];
         assert_eq!(names, expected, "Registered tools mismatch");
-        assert_eq!(registry.len(), 14);
+        assert_eq!(registry.len(), 15);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1451,5 +1469,119 @@ mod tests {
 
         let result = tool.execute(HashMap::new(), "cli", "me").await;
         assert!(result.error.is_some());
+    }
+
+    // ── memory tool tests ───────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn memory_read_empty_returns_placeholder() {
+        let tmp = TempDir::new().expect("tmp");
+        let tool = MemoryTool::new(tmp.path().to_path_buf());
+        let mut args = HashMap::new();
+        args.insert("action".to_string(), Value::String("read".to_string()));
+        let result = tool.execute(args, "", "").await;
+        assert!(result.error.is_none(), "{:?}", result.error);
+        assert_eq!(result.for_llm.as_deref(), Some("(memory is empty)"));
+    }
+
+    #[tokio::test]
+    async fn memory_write_and_read_roundtrip() {
+        let tmp = TempDir::new().expect("tmp");
+        let tool = MemoryTool::new(tmp.path().to_path_buf());
+
+        let mut write_args = HashMap::new();
+        write_args.insert("action".to_string(), Value::String("write".to_string()));
+        write_args.insert(
+            "content".to_string(),
+            Value::String("User prefers dark mode".to_string()),
+        );
+        let wr = tool.execute(write_args, "", "").await;
+        assert!(wr.error.is_none(), "{:?}", wr.error);
+
+        let mut read_args = HashMap::new();
+        read_args.insert("action".to_string(), Value::String("read".to_string()));
+        let rd = tool.execute(read_args, "", "").await;
+        assert!(rd.error.is_none());
+        assert_eq!(rd.for_llm.as_deref(), Some("User prefers dark mode"));
+    }
+
+    #[tokio::test]
+    async fn memory_append_accumulates() {
+        let tmp = TempDir::new().expect("tmp");
+        let tool = MemoryTool::new(tmp.path().to_path_buf());
+
+        let mut a1 = HashMap::new();
+        a1.insert("action".to_string(), Value::String("append".to_string()));
+        a1.insert("content".to_string(), Value::String("fact-1".to_string()));
+        tool.execute(a1, "", "").await;
+
+        let mut a2 = HashMap::new();
+        a2.insert("action".to_string(), Value::String("append".to_string()));
+        a2.insert("content".to_string(), Value::String("fact-2".to_string()));
+        tool.execute(a2, "", "").await;
+
+        let mut rd = HashMap::new();
+        rd.insert("action".to_string(), Value::String("read".to_string()));
+        let result = tool.execute(rd, "", "").await;
+        let text = result.for_llm.unwrap_or_default();
+        assert!(text.contains("fact-1"), "missing fact-1: {text}");
+        assert!(text.contains("fact-2"), "missing fact-2: {text}");
+    }
+
+    #[tokio::test]
+    async fn memory_daily_append_and_read() {
+        let tmp = TempDir::new().expect("tmp");
+        let tool = MemoryTool::new(tmp.path().to_path_buf());
+
+        // Empty daily
+        let mut rd = HashMap::new();
+        rd.insert("action".to_string(), Value::String("read_daily".to_string()));
+        let empty = tool.execute(rd, "", "").await;
+        assert_eq!(
+            empty.for_llm.as_deref(),
+            Some("(no daily notes for today)")
+        );
+
+        // Append daily
+        let mut ap = HashMap::new();
+        ap.insert(
+            "action".to_string(),
+            Value::String("append_daily".to_string()),
+        );
+        ap.insert(
+            "content".to_string(),
+            Value::String("Met with team".to_string()),
+        );
+        let wr = tool.execute(ap, "", "").await;
+        assert!(wr.error.is_none(), "{:?}", wr.error);
+
+        // Read back
+        let mut rd2 = HashMap::new();
+        rd2.insert("action".to_string(), Value::String("read_daily".to_string()));
+        let result = tool.execute(rd2, "", "").await;
+        assert!(
+            result.for_llm.unwrap_or_default().contains("Met with team"),
+            "daily notes should contain appended content"
+        );
+    }
+
+    #[tokio::test]
+    async fn memory_invalid_action_returns_error() {
+        let tmp = TempDir::new().expect("tmp");
+        let tool = MemoryTool::new(tmp.path().to_path_buf());
+        let mut args = HashMap::new();
+        args.insert("action".to_string(), Value::String("delete".to_string()));
+        let result = tool.execute(args, "", "").await;
+        assert!(result.error.is_some());
+        assert!(result.error.unwrap().contains("Unknown action"));
+    }
+
+    #[tokio::test]
+    async fn memory_missing_action_returns_error() {
+        let tmp = TempDir::new().expect("tmp");
+        let tool = MemoryTool::new(tmp.path().to_path_buf());
+        let result = tool.execute(HashMap::new(), "", "").await;
+        assert!(result.error.is_some());
+        assert!(result.error.unwrap().contains("action"));
     }
 }

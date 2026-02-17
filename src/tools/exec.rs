@@ -118,18 +118,23 @@ impl Tool for ExecTool {
             }
         }
 
-        let output = if cfg!(target_os = "windows") {
+        let timeout = std::time::Duration::from_secs(30);
+
+        let fut = if cfg!(target_os = "windows") {
             tokio::process::Command::new("cmd")
                 .args(["/C", &command])
                 .current_dir(&self.workspace)
                 .output()
-                .await
         } else {
             tokio::process::Command::new("sh")
                 .args(["-c", &command])
                 .current_dir(&self.workspace)
                 .output()
-                .await
+        };
+
+        let output = match tokio::time::timeout(timeout, fut).await {
+            Ok(result) => result,
+            Err(_) => return ToolResult::error("Command timed out after 30 seconds"),
         };
 
         match output {

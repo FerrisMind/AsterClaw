@@ -7,14 +7,14 @@ use axum::routing::post;
 use axum::{Json, Router};
 use serde_json::json;
 
-fn femtors_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_femtors"))
+fn asterclaw_bin() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_asterclaw"))
 }
 
-fn run_femtors(home: &Path, args: &[&str]) -> anyhow::Result<std::process::Output> {
-    let mut child = Command::new(femtors_bin())
+fn run_asterclaw(home: &Path, args: &[&str]) -> anyhow::Result<std::process::Output> {
+    let mut child = Command::new(asterclaw_bin())
         .args(args)
-        .env("FEMTORS_HOME", home)
+        .env("ASTERCLAW_HOME", home)
         .env("HOME", home)
         .env("USERPROFILE", home)
         .stdin(Stdio::null())
@@ -30,7 +30,7 @@ fn run_femtors(home: &Path, args: &[&str]) -> anyhow::Result<std::process::Outpu
                 let _ = child.kill();
                 let out = child.wait_with_output()?;
                 anyhow::bail!(
-                    "femtors timed out after 15s.\nstdout: {}\nstderr: {}",
+                    "asterclaw timed out after 15s.\nstdout: {}\nstderr: {}",
                     String::from_utf8_lossy(&out.stdout),
                     String::from_utf8_lossy(&out.stderr)
                 );
@@ -46,7 +46,7 @@ fn write_config(
     api_base: Option<&str>,
     gateway_port: i32,
 ) -> anyhow::Result<()> {
-    let cfg_dir = home.join(".femtors");
+    let cfg_dir = home.join(".asterclaw");
     std::fs::create_dir_all(&cfg_dir)?;
     std::fs::create_dir_all(workspace)?;
     let cfg = json!({
@@ -128,18 +128,18 @@ fn e2e_onboard_and_status() -> anyhow::Result<()> {
     let tmp = tempfile::tempdir()?;
     let home = tmp.path();
 
-    let onboard = run_femtors(home, &["onboard"])?;
+    let onboard = run_asterclaw(home, &["onboard"])?;
     assert!(
         onboard.status.success(),
         "{}",
         String::from_utf8_lossy(&onboard.stderr)
     );
 
-    assert!(home.join(".femtors/config.json").exists());
-    assert!(home.join(".femtors/workspace/memory/MEMORY.md").exists());
-    assert!(home.join(".femtors/workspace/cron").exists());
+    assert!(home.join(".asterclaw/config.json").exists());
+    assert!(home.join(".asterclaw/workspace/memory/MEMORY.md").exists());
+    assert!(home.join(".asterclaw/workspace/cron").exists());
 
-    let status = run_femtors(home, &["status"])?;
+    let status = run_asterclaw(home, &["status"])?;
     assert!(status.status.success());
     let stdout = String::from_utf8_lossy(&status.stdout);
     assert!(stdout.contains("Config:"));
@@ -152,7 +152,7 @@ fn e2e_auth_primary_and_legacy_fallback() -> anyhow::Result<()> {
     let tmp = tempfile::tempdir()?;
     let home = tmp.path();
 
-    let legacy_dir = home.join(".femtors");
+    let legacy_dir = home.join(".asterclaw");
     std::fs::create_dir_all(&legacy_dir)?;
     std::fs::write(
         legacy_dir.join("credentials.json"),
@@ -172,11 +172,11 @@ fn e2e_auth_primary_and_legacy_fallback() -> anyhow::Result<()> {
         .to_string(),
     )?;
 
-    let status_legacy = run_femtors(home, &["auth", "status"])?;
+    let status_legacy = run_asterclaw(home, &["auth", "status"])?;
     assert!(status_legacy.status.success());
     assert!(String::from_utf8_lossy(&status_legacy.stdout).contains("openai"));
 
-    let login = run_femtors(
+    let login = run_asterclaw(
         home,
         &[
             "auth",
@@ -188,11 +188,11 @@ fn e2e_auth_primary_and_legacy_fallback() -> anyhow::Result<()> {
         ],
     )?;
     assert!(login.status.success());
-    assert!(home.join(".femtors/credentials.json").exists());
+    assert!(home.join(".asterclaw/credentials.json").exists());
 
-    let logout = run_femtors(home, &["auth", "logout", "--provider", "openai"])?;
+    let logout = run_asterclaw(home, &["auth", "logout", "--provider", "openai"])?;
     assert!(logout.status.success());
-    let status_after = run_femtors(home, &["auth", "status"])?;
+    let status_after = run_asterclaw(home, &["auth", "status"])?;
     assert!(status_after.status.success());
     assert!(String::from_utf8_lossy(&status_after.stdout).contains("No authenticated providers."));
     Ok(())
@@ -205,7 +205,7 @@ fn e2e_cron_lifecycle() -> anyhow::Result<()> {
     let workspace = home.join("ws");
     write_config(home, &workspace, None, 18790)?;
 
-    let add = run_femtors(
+    let add = run_asterclaw(
         home,
         &[
             "cron",
@@ -242,16 +242,16 @@ fn e2e_cron_lifecycle() -> anyhow::Result<()> {
         "cron add output did not contain id: {added}"
     );
 
-    let list = run_femtors(home, &["cron", "list"])?;
+    let list = run_asterclaw(home, &["cron", "list"])?;
     assert!(list.status.success());
     assert!(String::from_utf8_lossy(&list.stdout).contains("job1"));
 
-    let disable = run_femtors(home, &["cron", "disable", &id])?;
+    let disable = run_asterclaw(home, &["cron", "disable", &id])?;
     assert!(disable.status.success());
-    let enable = run_femtors(home, &["cron", "enable", &id])?;
+    let enable = run_asterclaw(home, &["cron", "enable", &id])?;
     assert!(enable.status.success());
 
-    let remove = run_femtors(home, &["cron", "remove", &id])?;
+    let remove = run_asterclaw(home, &["cron", "remove", &id])?;
     assert!(remove.status.success());
     assert!(String::from_utf8_lossy(&remove.stdout).contains("Removed cron job"));
     Ok(())
@@ -267,7 +267,7 @@ async fn e2e_agent_with_mock_provider() -> anyhow::Result<()> {
 
     let home_clone = home.clone();
     let out = tokio::task::spawn_blocking(move || {
-        run_femtors(&home_clone, &["agent", "-m", "hello", "-s", "cli:e2e"])
+        run_asterclaw(&home_clone, &["agent", "-m", "hello", "-s", "cli:e2e"])
     })
     .await??;
     let _ = shutdown.send(());
@@ -289,9 +289,9 @@ async fn e2e_gateway_health_ready() -> anyhow::Result<()> {
     let port = free_port() as i32;
     write_config(home, &workspace, Some(&api_base), port)?;
 
-    let mut child = Command::new(femtors_bin())
+    let mut child = Command::new(asterclaw_bin())
         .args(["gateway"])
-        .env("FEMTORS_HOME", home)
+        .env("ASTERCLAW_HOME", home)
         .env("HOME", home)
         .env("USERPROFILE", home)
         .stdout(Stdio::null())
@@ -336,7 +336,7 @@ fn e2e_migrate_dry_run() -> anyhow::Result<()> {
     std::fs::write(source.join("workspace/memory/MEMORY.md"), "legacy")?;
     std::fs::write(source.join("config.json"), "{}")?;
 
-    let out = run_femtors(home, &["migrate", "--dry-run"])?;
+    let out = run_asterclaw(home, &["migrate", "--dry-run"])?;
     assert!(
         out.status.success(),
         "{}",
@@ -346,6 +346,6 @@ fn e2e_migrate_dry_run() -> anyhow::Result<()> {
     assert!(stdout.contains("Migration summary:"));
     assert!(stdout.contains("Config migrated: true"));
     // dry-run must NOT create the target config
-    assert!(!home.join(".femtors/config.json").exists());
+    assert!(!home.join(".asterclaw/config.json").exists());
     Ok(())
 }

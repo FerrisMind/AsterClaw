@@ -1,4 +1,4 @@
-//! Migration utilities from legacy `.picoclaw` layout to `.femtors`.
+//! Migration utilities from legacy `.picoclaw` layout to `.asterclaw`.
 
 use anyhow::{Result, anyhow};
 use std::path::{Path, PathBuf};
@@ -20,7 +20,7 @@ pub fn migrate_from_openclaw(
     workspace_only: bool,
     force: bool,
     openclaw_home: Option<&str>,
-    femtors_home: Option<&str>,
+    asterclaw_home: Option<&str>,
 ) -> Result<MigrateResult> {
     if config_only && workspace_only {
         return Err(anyhow!(
@@ -29,7 +29,7 @@ pub fn migrate_from_openclaw(
     }
 
     let source_home = resolve_home(openclaw_home, ".picoclaw")?;
-    let target_home = resolve_home(femtors_home, ".femtors")?;
+    let target_home = resolve_home(asterclaw_home, ".asterclaw")?;
     let mut result = MigrateResult::default();
 
     if !workspace_only {
@@ -46,8 +46,8 @@ fn resolve_home(override_path: Option<&str>, default_suffix: &str) -> Result<Pat
     if let Some(path) = override_path {
         return Ok(expand_home(path));
     }
-    // Respect FEMTORS_HOME override (consistent with config::resolve_home_dir).
-    if let Ok(ph) = std::env::var("FEMTORS_HOME") {
+    // Respect ASTERCLAW_HOME override (consistent with config::resolve_home_dir).
+    if let Ok(ph) = std::env::var("ASTERCLAW_HOME") {
         let trimmed = ph.trim();
         if !trimmed.is_empty() {
             return Ok(PathBuf::from(trimmed).join(default_suffix));
@@ -107,7 +107,7 @@ fn load_legacy_config(path: &Path) -> Result<Config> {
     let value: serde_json::Value = serde_json::from_str(&raw)?;
     let normalized = normalize_keys(value);
     let mut cfg: Config = serde_json::from_value(normalized)?;
-    rewrite_paths_for_femtors(&mut cfg);
+    rewrite_paths_for_asterclaw(&mut cfg);
     Ok(cfg)
 }
 
@@ -150,12 +150,12 @@ fn camel_to_snake(input: &str) -> String {
     out
 }
 
-fn rewrite_paths_for_femtors(cfg: &mut Config) {
+fn rewrite_paths_for_asterclaw(cfg: &mut Config) {
     cfg.agents.defaults.workspace = cfg
         .agents
         .defaults
         .workspace
-        .replace(".picoclaw", ".femtors");
+        .replace(".picoclaw", ".asterclaw");
 }
 
 fn merge_provider(dst: ProviderConfig, src: ProviderConfig) -> ProviderConfig {

@@ -4,7 +4,7 @@
   <a href="README.PT_BR.md"><img src="https://img.shields.io/badge/Português_BR-3ABF7A" alt="Português"></a>
 </p>
 
-<h1 align="center">femtors</h1>
+<h1 align="center">AsterClaw</h1>
 
 <p align="center">
   Porta Rust 2024 do PicoClaw com gateway funcional, canal Telegram, provedores OpenAI-compativeis e comando `migrate`.
@@ -12,7 +12,7 @@
 
 ## 📚 Índice
 
-- [O que é femtors?](#-o-que-é-femtors)
+- [O que é AsterClaw?](#-o-que-é-asterclaw)
 - [Escopo do MVP](#-escopo-do-mvp)
 - [Comandos rápidos](#-comandos-rápidos)
 - [Configuração](#-configuração)
@@ -24,14 +24,14 @@
 - [Contribuindo](#-contribuindo)
 - [Licença](#-licença)
 
-## ✨ O que é femtors?
+## ✨ O que é AsterClaw?
 
-`femtors` é um gateway CLI em Rust 2024 que reproduz o stack do PicoClaw com loop de agentes, barramento de mensagens e dispatch para canais. O MVP prioriza:
+`AsterClaw` é um gateway CLI em Rust 2024 que reproduz o stack do PicoClaw com loop de agentes, barramento de mensagens e dispatch para canais. O MVP prioriza:
 
 - gateway + envio outbound
 - canal Telegram em polling com filtros (allowlist/username)
 - camada compatível com OpenAI (OpenAI/OpenRouter/Groq/Zhipu/DeepSeek)
-- compatibilidade dupla (`.femtors` → `.picoclaw`) e comando de migração real
+- compatibilidade dupla (`.asterclaw` → `.picoclaw`) e comando de migração real
 - armazenamento de cron e endpoints `/health`, `/ready`
 
 Objetivo: um MVP mínimo, porém utilizável, com `gateway`, Telegram, provedores e CLI completo (`migrate`, `cron`, `status`, `agent`, etc.).
@@ -46,27 +46,27 @@ Contrato canônico do MVP: `mvp.md`.
 | Canal Telegram | Polling, filtros (allowlist/username), comandos `/help`/`/list`/`/show`, saída markdown segura |
 | Provedores | Camada compatível com OpenAI controlada por config (forçar provedor → prefixo → fallback OpenRouter) |
 | Ferramentas | Operações de arquivos, `exec` protegido, `web_search`, `web_fetch`, contexto `message` |
-| Config + estado | Leitura dual (`.femtors` depois `.picoclaw`), nomes de sessão seguros para Windows, gravações atômicas |
+| Config + estado | Leitura dual (`.asterclaw` depois `.picoclaw`), nomes de sessão seguros para Windows, gravações atômicas |
 | Health & cron | `/health` + `/ready`, CRUD de cron persistido em JSON |
-| Migração | `femtors migrate` transfere config/workspace antigos com dry-run, flags e backups |
+| Migração | `asterclaw migrate` transfere config/workspace antigos com dry-run, flags e backups |
 
 ## ⚡ Comandos rápidos
 
 - `cargo check`
 - `cargo clippy -- -D warnings`
 - `cargo test`
-- `femtors gateway`
-- `femtors cron list`
-- `femtors migrate --dry-run`
-- `femtors status`
+- `asterclaw gateway`
+- `asterclaw cron list`
+- `asterclaw migrate --dry-run`
+- `asterclaw status`
 - `pwsh scripts/nfr-harness.ps1`
 
 Outros comandos (`agent`, `onboard`, `skills`, `auth`, `heartbeat`, `devices`) estão no `PLAN.md`.
 
 ## 🛠️ Configuração
 
-- **Config principal:** `~/.femtors/config.json` (escrito por onboarding, CLI e cron).
-- **Fallback legado:** se `.femtors` falta, lê-se `~/.picoclaw/config.json`, convertendo camelCase/snake_case conforme necessário.
+- **Config principal:** `~/.asterclaw/config.json` (escrito por onboarding, CLI e cron).
+- **Fallback legado:** se `.asterclaw` falta, lê-se `~/.picoclaw/config.json`, convertendo camelCase/snake_case conforme necessário.
 - **Workspace:** sessões, cron e skills vivem em `workspace.path` (ou pasta `workspace`), com gravação atômica.
 - **Estado:** nomes de sessão têm `:` substituído por `_` para recortar problemas no Windows, e são salvos de forma segura.
 
@@ -95,11 +95,11 @@ Todos os provedores compartilham parser unificado, tornando tool calls e streami
 
 ## 🔁 Comando de migração
 
-`femtors migrate` é uma funcionalidade importante do MVP:
+`asterclaw migrate` é uma funcionalidade importante do MVP:
 
 1. `--dry-run` exibe o plano sem fazer alterações.
 2. `--config-only` / `--workspace-only` restringem o escopo.
-3. `--force` cria backup em `~/.femtors/backups` e sobrescreve arquivos.
+3. `--force` cria backup em `~/.asterclaw/backups` e sobrescreve arquivos.
 4. Chaves legadas, sessões e arquivos de workspace são portados para o layout novo e o resultado (copiado/ignorado/erro) é exibido.
 
 Também normaliza nomes de sessão para compatibilidade com Windows.
@@ -108,15 +108,15 @@ Também normaliza nomes de sessão para compatibilidade com Windows.
 
 1. Instale toolchain Rust 2024 (`rust-toolchain.toml`) via `rustup`.
 2. Execute `cargo check`, `cargo clippy -- -D warnings`, `cargo test`.
-3. Inicie o gateway com `femtors gateway`; os logs mostram loops de agentes, chamadas de provedores e polling Telegram.
-4. Valide cron e migração com `femtors cron list` e `femtors migrate --dry-run`.
+3. Inicie o gateway com `asterclaw gateway`; os logs mostram loops de agentes, chamadas de provedores e polling Telegram.
+4. Valide cron e migração com `asterclaw cron list` e `asterclaw migrate --dry-run`.
 
 ## 🤝 Contribuindo
 
 - Siga o roteiro em `PLAN.md`.
 - Sincronize o texto de ajuda do CLI com o comportamento real.
 - Documente novos fluxos nas três versões do README.
-- Preserve a compatibilidade dual `.femtors`/`.picoclaw` ao tocar em config/estado.
+- Preserve a compatibilidade dual `.asterclaw`/`.picoclaw` ao tocar em config/estado.
 
 Bloqueadores e questões em andamento estão em `error.md`.
 

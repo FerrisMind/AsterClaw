@@ -1,0 +1,64 @@
+{
+  "agents": {
+    "defaults": {
+      "workspace": "~/.asterclaw/workspace",
+      "restrict_to_workspace": true,
+      "model": "gpt-4o-mini",
+      "max_tokens": 8192,
+      "temperature": 0.7,
+      "max_tool_iterations": 20
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": false,
+      "token": "YOUR_TELEGRAM_BOT_TOKEN",
+      "proxy": "",
+      "allow_from": [
+        "YOUR_USER_ID"
+      ]
+    }
+  },
+  "providers": {
+    "openai": {
+      "api_key": "",
+      "api_base": ""
+    },
+    "openrouter": {
+      "api_key": "sk-or-v1-xxx",
+      "api_base": ""
+    },
+    "groq": {
+      "api_key": "gsk_xxx",
+      "api_base": ""
+    },
+    "zhipu": {
+      "api_key": "YOUR_ZHIPU_API_KEY",
+      "api_base": ""
+    },
+    "deepseek": {
+      "api_key": "YOUR_DEEPSEEK_API_KEY",
+      "api_base": ""
+    }
+  },
+  "tools": {
+    "web": {
+      "search": {
+        "api_key": "YOUR_BRAVE_API_KEY",
+        "max_results": 5
+      }
+    }
+  },
+  "heartbeat": {
+    "enabled": true,
+    "interval": 30
+  },
+  "devices": {
+    "enabled": false,
+    "monitor_usb": true
+  },
+  "gateway": {
+    "host": "0.0.0.0",
+    "port": 18790
+  }
+}

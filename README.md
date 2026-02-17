@@ -4,157 +4,118 @@
   <a href="README.PT_BR.md"><img src="https://img.shields.io/badge/Português_BR-232323" alt="Português"></a>
 </p>
 
-<h1 align="center">FemtoRS</h1>
+<h1 align="center">AsterClaw</h1>
 
 <p align="center">
-  Rust rewrite of PicoClaw — 34% less memory, zero GC pauses, full feature parity.
+  Ultra-lightweight personal AI agent written in Rust.
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Rust-2024-DEA584?style=flat&logo=rust&logoColor=white" alt="Rust">
-  <img src="https://img.shields.io/badge/Tests-52%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-79%20passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/Clippy-0%20warnings-brightgreen" alt="Clippy">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
 </p>
 
-## 📚 Table of Contents
+## ✨ What is AsterClaw?
 
-- [What is FemtoRS?](#-what-is-femtors)
-- [Performance](#-performance)
-- [MVP Scope](#-mvp-scope)
-- [Quick Commands](#-quick-commands)
-- [Configuration](#-configuration)
-- [Provider Strategy](#-provider-strategy)
-- [Tooling & Messaging](#-tooling--messaging)
-- [Health, Cron, Heartbeat](#-health-cron-heartbeat)
-- [Migration Command](#-migration-command)
-- [Running & Testing](#-running--testing)
-- [Contributing](#-contributing)
-- [License](#-license)
+AsterClaw is an ultra-lightweight personal AI agent that runs as a local gateway, connects to LLM providers, and executes tools on your behalf. Built in Rust for maximum performance and minimal footprint.
 
-## ✨ What is FemtoRS?
+## 📊 Performance Comparison
 
-`FemtoRS` is a Rust rewrite of [PicoClaw](https://github.com/sipeed/picoclaw) — the ultra-lightweight Go AI assistant. FemtoRS achieves full gateway feature parity while delivering lower memory usage and zero garbage collection pauses:
+| Metric            | OpenClaw     | PicoClaw     | **AsterClaw**    |
+| :---------------- | :----------- | :----------- | :--------------- |
+| **Language**       | TypeScript   | Go           | **Rust**         |
+| **Binary size**    | >100 MB      | 23.9 MB      | **~5 MB**        |
+| **RAM usage**      | >1 GB        | <10 MB*      | **~11 MB**       |
+| **Boot time**      | >500s        | <1s          | **<1s**          |
+| **GC pauses**      | Yes (V8)     | Yes (Go GC)  | **None**         |
+| **Tests**          | —            | —            | **79 passing**   |
+| **Clippy warnings**| —            | —            | **0**            |
 
-- **73% smaller binary** (6.5 MB vs 23.9 MB)
-- **34% less memory** (11.5 MB vs 17.3 MB RSS)
-- **Zero GC pauses** — predictable latency under load
-- **Full feature parity** — agent loops, Telegram, 14 tools, cron, heartbeat, migration
-- **Dual config** (`.femtors` preferred, `.picoclaw` fallback) with real migration tooling
+> \* PicoClaw claims <10 MB RAM but recent versions measure 17–20 MB.
 
-Canonical MVP contract: `mvp.md`.
+### Why Rust?
 
-## 📊 Performance
+- **No garbage collector** — predictable latency under load, no stop-the-world pauses
+- **Tiny binary** — single ~5 MB executable, no runtime dependencies
+- **Memory efficient** — ~11 MB RSS, ideal for embedded and constrained devices
+- **Full feature parity** — 14 tools, Telegram, cron, heartbeat, migration
 
-Measured with `scripts/nfr_baseline.ps1` — gateway startup to `/health` readiness.
-
-**Test system:** Windows 11 Pro (26200), AMD Ryzen 7 3700X 8-Core, 64 GB RAM, NVMe SSD.
-
-|                     | PicoClaw (Go) | **FemtoRS (Rust)** | Δ          |
-| ------------------- | ------------- | ------------------ | ---------- |
-| **Binary size**     | 23.9 MB       | **6.5 MB**         | **−73%**   |
-| **RSS (steady)**    | 17.3 MB       | **11.5 MB**        | **−34%**   |
-| **Startup**         | ~113 ms       | **~108 ms**        | −4%        |
-| **GC pauses**       | Yes (Go GC)   | **None**           | —          |
-| **Tests**           | —             | **52 passing**     | —          |
-| **Clippy warnings** | —             | **0**              | —          |
-
-> **Note:** Startup times are I/O-bound (config read + TCP bind) where both languages perform similarly.
-> The real Rust advantage is under sustained load: no GC stop-the-world pauses, lower tail latency, and smaller memory footprint on constrained devices.
-> PicoClaw claims <10 MB RAM but [notes](https://github.com/sipeed/picoclaw#readme) that recent PRs push it to 10–20 MB. FemtoRS at 11.5 MB is closer to that original target than Go's current 17.3 MB.
-
-Run the benchmark yourself:
-
-```powershell
-# Rust only
-.\scripts\nfr_baseline.ps1
-
-# Compare with Go baseline
-.\scripts\nfr_baseline.ps1 -GoBaseline path\to\picoclaw.exe
-```
-
-## 🚀 MVP Scope
+## 🚀 Features
 
 | Area | Description |
 | --- | --- |
-| Gateway + agent loop | Consume inbound messages, run tools/providers, publish outbound events, notify channels |
+| Gateway + agent loop | Consume inbound messages, run tools/providers, publish outbound events |
 | Telegram channel | Polling mode, allowlist/username filters, `/help`/`/list`/`/show`, markdown-safe outbound |
-| Provider pipeline | OpenAI-compatible layer with config-driven provider selection (explicit provider → model prefix → OpenRouter) |
-| Core tools (14) | Filesystem, guarded `exec`, `web_search`, `web_fetch`, `message`, `spawn`, `subagent`, `cron`, `i2c`, `spi` |
-| Config + state | Dual read paths (`.femtors` → `.picoclaw`), sanitized Windows-safe session names, atomic saves |
-| Health & cron | `/health` + `/ready` endpoints, cron CRUD persisted under `workspace/cron/jobs.json` |
-| Migration | `femtors migrate` mirrors legacy `.picoclaw` layout (config + workspace) with dry-run, scope flags, backups |
-| NFR benchmark | `scripts/nfr_baseline.ps1` — RSS and startup comparison with Go baseline |
+| Provider pipeline | OpenAI-compatible layer with config-driven provider selection |
+| Core tools (14) | `read_file`, `write_file`, `edit_file`, `append_file`, `list_dir`, `exec`, `web_search`, `web_fetch`, `message`, `spawn`, `subagent`, `cron`, `i2c`, `spi` |
+| Config + state | `~/.asterclaw/config.json`, sanitized Windows-safe session names, atomic saves |
+| Health & cron | `/health` + `/ready` endpoints, cron CRUD persisted in workspace |
+| Migration | `asterclaw migrate` with dry-run, scope flags, and backups |
 
-## ⚡ Quick Commands
+## ⚡ Quick Start
 
-- `cargo check`
-- `cargo clippy -- -D warnings`
-- `cargo test`
-- `femtors gateway`
-- `femtors cron list`
-- `femtors migrate --dry-run`
-- `femtors status`
-- `.\scripts\nfr_baseline.ps1`
+```bash
+# Build
+cargo build --release
 
-Additional commands (`agent`, `onboard`, `skills`, `auth`, `heartbeat`, `devices`) are documented in `PLAN.md`.
+# Initialize config
+asterclaw onboard
+
+# Start the gateway
+asterclaw gateway
+
+# Check status
+asterclaw status
+```
 
 ## 🛠️ Configuration
 
-- **Primary config:** `~/.femtors/config.json` (written by onboarding, CLI commands, and cron service).
-- **Legacy fallback:** If `.femtors` is absent, runtime reads `~/.picoclaw/config.json`, translating camelCase/snake_case keys before merging.
-- **Workspace:** Sessions, cron jobs, and skills live inside the configured `workspace.path` (or `workspace` directory under the current workspace) with atomic persistence.
-- **State:** Sessions are stored using Windows-safe filenames (sanitize `:` → `_`), with atomic writes to avoid corruption.
+- **Config:** `~/.asterclaw/config.json` — created by `asterclaw onboard`.
+- **Workspace:** Sessions, cron jobs, and skills live inside the configured workspace directory with atomic persistence.
+- **State:** Sessions use Windows-safe filenames with atomic writes to avoid corruption.
 
 ## 🎛️ Provider Strategy
 
 1. **OpenAI** — default when `providers.openai` or model prefixes imply OpenAI APIs.
-2. **OpenRouter** — fallback when `api_base` contains `openrouter.ai` and no explicit provider is set.
-3. **Groq / Zhipu / DeepSeek** — supported via the shared OpenAI-compatible layer (provider selection from config/model prefix).
-4. **Environment fallback** — `OPENAI_API_KEY`/`OPENAI_API_BASE` and their provider-specific equivalents are consulted when config lacks keys, but config values always override env.
+2. **OpenRouter** — fallback when no explicit provider is set.
+3. **Groq / Zhipu / DeepSeek / Anthropic** — supported via the shared OpenAI-compatible layer.
+4. **Environment fallback** — `OPENAI_API_KEY` and provider-specific equivalents are consulted when config lacks keys.
 
-Providers share a unified request/response parser, making features like tool calls and streaming consistent across the stack.
+Providers share a unified request/response parser, making tool calls and streaming consistent across the stack.
 
-## 🧱 Tooling & Messaging
+## 🧱 Tools
 
-- **Filesystem tools** guard against directory traversal and avoid aggressive `canonicalize()` on child writes.
-- **`exec` tool** enforces workspace policies and filters dangerous patterns before spawning commands.
-- **`web_search`** integrates Brave/DDG endpoints via the tool interface when enabled (`web_search.enabled`).
-- **`web_fetch`** downloads online resources and returns structured metadata for prompts.
-- **`message` tool** lets models speak directly through Telegram or other channels without re-publishing outbound events.
+- **Filesystem tools** guard against directory traversal.
+- **`exec`** enforces workspace policies and filters dangerous patterns before spawning commands.
+- **`web_search`** integrates Brave/DuckDuckGo for web research.
+- **`web_fetch`** downloads online resources and returns structured content.
+- **`message`** lets the model speak directly through channels.
+- **`cron`** schedules recurring messages and tasks.
+- **`i2c` / `spi`** — device I/O for embedded/IoT use cases.
 
-## 🧪 Health, Cron, Heartbeat
+## 🧪 Health & Cron
 
-- Health server exposes `/health` (liveness) and `/ready` (gateway readiness) endpoints within the `gateway` process.
-- Cron jobs persist in `workspace/cron/jobs.json`; CLI commands allow `add/list/remove/enable/disable`, and the cron runner schedules JSON-backed jobs.
-- Heartbeat is minimal in MVP — only triggers periodically when configured and paired with cron services.
+- Health server exposes `/health` (liveness) and `/ready` (readiness) endpoints.
+- Cron jobs persist in workspace; CLI commands allow `add/list/remove/enable/disable`.
+- Heartbeat triggers periodically when configured.
 
-## 🔁 Migration Command
+## 🔁 Migration
 
-`femtors migrate` is treated as a first-class MVP feature:
+`asterclaw migrate` migrates data from legacy configurations:
 
-1. `--dry-run` reports planned copies/conversions without modifying anything.
-2. `--config-only` or `--workspace-only` limit the migration scope.
-3. `--force` backs up existing `.femtors` files (under `~/.femtors/backups`) before overwriting.
-4. Legacy provider keys, sessions, skills, and memory files are migrated to the new layout with summaries (copied/skipped/errors).
+1. `--dry-run` — preview without changes.
+2. `--config-only` or `--workspace-only` — limit scope.
+3. `--force` — backup existing files before overwriting.
 
-Migration also sanitizes session filenames so Windows paths stay valid.
+## 🧰 Development
 
-## 🧰 Running & Testing
-
-1. Install Rust 2024 toolchain (`rust-toolchain.toml`) via `rustup`.
-2. Run `cargo check`, `cargo clippy -- -D warnings`, and `cargo test` before committing.
-3. Start the gateway locally with `femtors gateway`; logs include agent loops, provider requests, and Telegram polling.
-4. Use `femtors cron list` and `femtors migrate --dry-run` during development to validate cron persistence and migration logic.
-
-## 🤝 Contributing
-
-- Follow the phased roadmap in `PLAN.md` to understand upcoming work.
-- Keep CLI help text synchronized with implemented commands (no placeholder `TODO`s).
-- Document new user-visible features in all three README files.
-- Preserve the dual `.femtors`/`.picoclaw` compatibility guarantees when touching config/state code.
-
-For blockers or ongoing work, see `error.md`.
+```bash
+cargo check
+cargo clippy -- -D warnings
+cargo test
+```
 
 ## 📄 License
 

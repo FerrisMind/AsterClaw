@@ -337,8 +337,11 @@ fn provider_meta<'a>(config: &'a Config, provider_name: &str) -> Result<Provider
         )),
         "openrouter" => {
             let mut headers = HashMap::new();
-            headers.insert("HTTP-Referer".to_string(), "https://femtors.ai".to_string());
-            headers.insert("X-Title".to_string(), "femtors".to_string());
+            headers.insert(
+                "HTTP-Referer".to_string(),
+                "https://asterclaw.ai".to_string(),
+            );
+            headers.insert("X-Title".to_string(), "AsterClaw".to_string());
             Ok((
                 &config.providers.openrouter,
                 "https://openrouter.ai/api/v1",

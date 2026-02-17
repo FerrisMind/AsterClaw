@@ -74,8 +74,45 @@ impl ContextBuilder {
         );
 
         let mut sections = Vec::new();
+        let channel_instructions = match channel {
+            "telegram" => format!(
+                concat!(
+                    "\n\n## Channel\nYou are responding in **Telegram** (chat_id: {}).\n\n",
+                    "### Formatting Rules for Telegram\n",
+                    "Your response will be auto-converted to Telegram-safe HTML. You can use standard Markdown:\n",
+                    "- **bold**, *bold*, _italic_, ~~strikethrough~~\n",
+                    "- `inline code` and ```code blocks```\n",
+                    "- [links](url) work\n",
+                    "- > blockquotes work\n",
+                    "- Bullet lists (- item) work\n\n",
+                    "Style guidance:\n",
+                    "- Keep messages concise — Telegram is a chat, not a document\n",
+                    "- Avoid long walls of text; prefer short paragraphs\n",
+                    "- Use line breaks between sections for readability\n",
+                    "- # headings will be rendered as bold text\n",
+                ),
+                chat_id,
+            ),
+            "cli" => "\n\n## Channel\nYou are responding in the CLI terminal. Use standard Markdown formatting.".to_string(),
+            _ => format!("\n\n## Channel\nYou are responding via the '{}' channel.", channel),
+        };
+
         sections.push(format!(
-            "# femtors 🦞\n\nYou are femtors, a helpful AI assistant.\n\n## Current Time\n{}\n\n## Runtime\n{}\n\n## Workspace\nYour workspace is at: {}\n- Memory: {}/memory/MEMORY.md\n- Daily Notes: {}/memory/YYYYMM/YYYYMMDD.md\n- Skills: {}/skills/{{skill-name}}/SKILL.md",
+            concat!(
+                "# AsterClaw\n\nYou are AsterClaw, a helpful AI assistant.{}\n\n",
+                "## Citation Rules\n",
+                "When you use web_search or web_fetch tools, you MUST:\n",
+                "1. Synthesize the information into a clear, natural answer\n",
+                "2. At the end of your answer, add a \"Sources\" section with hyperlinks: [Title](url)\n",
+                "3. Never dump raw search snippets or fetched HTML to the user\n",
+                "4. Keep sources compact — just the relevant ones you actually used\n\n",
+                "## Current Time\n{}\n\n## Runtime\n{}\n\n",
+                "## Workspace\nYour workspace is at: {}\n",
+                "- Memory: {}/memory/MEMORY.md\n",
+                "- Daily Notes: {}/memory/YYYYMM/YYYYMMDD.md\n",
+                "- Skills: {}/skills/{{skill-name}}/SKILL.md",
+            ),
+            channel_instructions,
             now,
             runtime,
             self.workspace.display(),
@@ -185,5 +222,7 @@ mod tests {
         assert!(prompt.contains("Available Tools"));
         assert!(prompt.contains("AGENTS.md"));
         assert!(prompt.contains("Web Research Workflow"));
+        assert!(prompt.contains("Telegram"));
+        assert!(prompt.contains("Formatting Rules"));
     }
 }

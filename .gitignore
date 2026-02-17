@@ -6,6 +6,7 @@ target/
 # Rust tools
 /.cargo/
 
+
 # IDEs and editors
 .idea/
 .vscode/
@@ -35,3 +36,5 @@ Thumbs.db
 # References artifacts
 references/picoclaw/target/
 references/
+
+scripts/

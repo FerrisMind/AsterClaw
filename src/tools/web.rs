@@ -256,7 +256,7 @@ impl Tool for WebSearchTool {
         };
 
         match result {
-            Ok(out) => ToolResult::new(&out).with_for_llm(&out).with_for_user(&out),
+            Ok(out) => ToolResult::new(&out).with_for_llm(&out),
             Err(e) => ToolResult::error(&format!("search failed: {}", e)),
         }
     }
@@ -384,15 +384,11 @@ impl Tool for WebFetchTool {
             "length": text.chars().count(),
             "text": text,
         });
-        let for_user =
-            serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string());
         let for_llm = format!(
             "Fetched URL (status={}, truncated={}, chars={})\n\n{}",
             status, truncated, payload["length"], text
         );
 
-        ToolResult::new(&for_user)
-            .with_for_user(&for_user)
-            .with_for_llm(&for_llm)
+        ToolResult::new(&for_llm).with_for_llm(&for_llm)
     }
 }

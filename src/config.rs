@@ -1,4 +1,4 @@
-//! Configuration module for femtors
+//! Configuration module for AsterClaw
 //! Ported from Go version
 
 use std::path::{Path, PathBuf};
@@ -65,7 +65,7 @@ impl Default for AgentDefaults {
 }
 
 fn default_workspace() -> String {
-    "~/.femtors/workspace".to_string()
+    "~/.asterclaw/workspace".to_string()
 }
 
 fn default_true() -> bool {
@@ -265,10 +265,10 @@ impl Default for DevicesConfig {
     }
 }
 
-/// Get the config path (~/.femtors/config.json)
+/// Get the config path (~/.asterclaw/config.json)
 pub fn get_config_path() -> anyhow::Result<PathBuf> {
     let home = resolve_home_dir()?;
-    Ok(home.join(".femtors").join("config.json"))
+    Ok(home.join(".asterclaw").join("config.json"))
 }
 
 /// Get legacy config path (~/.picoclaw/config.json).
@@ -278,7 +278,7 @@ pub fn get_legacy_config_path() -> anyhow::Result<PathBuf> {
 }
 
 fn resolve_home_dir() -> anyhow::Result<PathBuf> {
-    if let Ok(path) = std::env::var("FEMTORS_HOME") {
+    if let Ok(path) = std::env::var("ASTERCLAW_HOME") {
         let trimmed = path.trim();
         if !trimmed.is_empty() {
             return Ok(PathBuf::from(trimmed));
@@ -295,7 +295,7 @@ pub fn load_config(path: &Path) -> anyhow::Result<Config> {
         return Ok(config);
     }
 
-    // Dual compatibility mode: fall back to legacy ~/.femtors/config.json
+    // Dual compatibility mode: fall back to legacy ~/.picoclaw/config.json
     let legacy = get_legacy_config_path()?;
     if legacy.exists() {
         let data = std::fs::read_to_string(&legacy)?;
@@ -325,7 +325,7 @@ impl Config {
     }
 }
 
-/// Expand ~ to home directory (respects `FEMTORS_HOME` env var).
+/// Expand ~ to home directory (respects `ASTERCLAW_HOME` env var).
 fn expand_home(path: &str) -> PathBuf {
     if path.starts_with('~')
         && let Ok(home) = resolve_home_dir()
@@ -341,8 +341,16 @@ fn expand_home(path: &str) -> PathBuf {
 fn parse_compat_json(data: &str) -> anyhow::Result<Config> {
     let value: serde_json::Value = serde_json::from_str(data)?;
     let normalized = normalize_keys(value);
-    let config: Config = serde_json::from_value(normalized)?;
+    let mut config: Config = serde_json::from_value(normalized)?;
+    config.agents.defaults.workspace = normalize_workspace_path(&config.agents.defaults.workspace);
     Ok(config)
+}
+
+fn normalize_workspace_path(workspace: &str) -> String {
+    workspace
+        .replace(".picors", ".asterclaw")
+        .replace(".femtors", ".asterclaw")
+        .replace(".picoclaw", ".asterclaw")
 }
 
 fn normalize_keys(value: serde_json::Value) -> serde_json::Value {
@@ -397,5 +405,23 @@ mod tests {
         let parsed = parse_compat_json(raw).expect("parse");
         assert_eq!(parsed.agents.defaults.max_tool_iterations, 7);
         assert!(!parsed.devices.monitor_usb);
+    }
+
+    #[test]
+    fn rewrites_legacy_workspace_brands_to_asterclaw() {
+        let raw = r#"{
+            "agents": { "defaults": { "workspace": "~/.picors/workspace" } }
+        }"#;
+        let parsed = parse_compat_json(raw).expect("parse");
+        assert_eq!(parsed.agents.defaults.workspace, "~/.asterclaw/workspace");
+
+        let raw_femtors = r#"{
+            "agents": { "defaults": { "workspace": "~/.femtors/workspace" } }
+        }"#;
+        let parsed_femtors = parse_compat_json(raw_femtors).expect("parse");
+        assert_eq!(
+            parsed_femtors.agents.defaults.workspace,
+            "~/.asterclaw/workspace"
+        );
     }
 }

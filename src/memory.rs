@@ -18,7 +18,6 @@ impl MemoryStore {
         }
     }
 
-    #[allow(dead_code)]
     fn today_file(&self) -> PathBuf {
         let today = chrono::Local::now().format("%Y%m%d").to_string();
         let month = &today[..6];
@@ -29,7 +28,6 @@ impl MemoryStore {
         std::fs::read_to_string(&self.memory_file).unwrap_or_default()
     }
 
-    #[allow(dead_code)]
     pub fn write_long_term(&self, content: &str) -> anyhow::Result<()> {
         if let Some(parent) = self.memory_file.parent() {
             std::fs::create_dir_all(parent)?;
@@ -38,12 +36,10 @@ impl MemoryStore {
         Ok(())
     }
 
-    #[allow(dead_code)]
     pub fn read_today(&self) -> String {
         std::fs::read_to_string(self.today_file()).unwrap_or_default()
     }
 
-    #[allow(dead_code)]
     pub fn append_today(&self, content: &str) -> anyhow::Result<()> {
         let today_file = self.today_file();
         if let Some(parent) = today_file.parent() {

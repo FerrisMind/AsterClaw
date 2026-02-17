@@ -60,7 +60,7 @@ impl SessionManager {
         }
     }
 
-    /// Add a message to a session
+    /// Add a message to a session (auto-saves to disk).
     pub fn add_message(&mut self, key: &str, role: &str, content: &str) {
         let session = self.get_or_create(key);
         session.messages.push(ProviderMessage {
@@ -70,13 +70,15 @@ impl SessionManager {
             tool_call_id: None,
         });
         Self::trim_history(&mut session.messages);
+        let _ = self.save(key);
     }
 
-    /// Add a full message (with tool calls)
+    /// Add a full message (with tool calls, auto-saves to disk).
     pub fn add_full_message(&mut self, key: &str, msg: ProviderMessage) {
         let session = self.get_or_create(key);
         session.messages.push(msg);
         Self::trim_history(&mut session.messages);
+        let _ = self.save(key);
     }
 
     /// Get session history

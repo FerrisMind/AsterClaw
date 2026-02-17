@@ -1,4 +1,4 @@
-//! FemtoRS - Ultra-lightweight personal AI agent
+//! AsterClaw - Ultra-lightweight personal AI agent
 //! Rust port from Go version
 
 mod agent;
@@ -28,19 +28,19 @@ use std::env;
 use std::sync::Arc;
 
 const BANNER: &str = r#"
- ███████████                           █████             ███████████    █████████ 
-▒▒███▒▒▒▒▒▒█                          ▒▒███             ▒▒███▒▒▒▒▒███  ███▒▒▒▒▒███
- ▒███   █ ▒   ██████  █████████████   ███████    ██████  ▒███    ▒███ ▒███    ▒▒▒ 
- ▒███████    ███▒▒███▒▒███▒▒███▒▒███ ▒▒▒███▒    ███▒▒███ ▒██████████  ▒▒█████████ 
- ▒███▒▒▒█   ▒███████  ▒███ ▒███ ▒███   ▒███    ▒███ ▒███ ▒███▒▒▒▒▒███  ▒▒▒▒▒▒▒▒███
- ▒███  ▒    ▒███▒▒▒   ▒███ ▒███ ▒███   ▒███ ███▒███ ▒███ ▒███    ▒███  ███    ▒███
- █████      ▒▒██████  █████▒███ █████  ▒▒█████ ▒▒██████  █████   █████▒▒█████████ 
-▒▒▒▒▒        ▒▒▒▒▒▒  ▒▒▒▒▒ ▒▒▒ ▒▒▒▒▒    ▒▒▒▒▒   ▒▒▒▒▒▒  ▒▒▒▒▒   ▒▒▒▒▒  ▒▒▒▒▒▒▒▒▒  
-
+   █████████         █████                         █████████  ████                          
+  ███░░░░░███       ░░███                         ███░░░░░███░░███                          
+ ░███    ░███  ████████████    ██████  ████████  ███     ░░░  ░███   ██████  █████ ███ █████
+ ░███████████ ███░░░░░███░    ███░░███░░███░░███░███          ░███  ░░░░░███░░███ ░███░░███ 
+ ░███░░░░░███░░█████ ░███    ░███████  ░███ ░░░ ░███          ░███   ███████ ░███ ░███ ░███ 
+ ░███    ░███ ░░░░███░███ ███░███░░░   ░███     ░░███     ███ ░███  ███░░███ ░░███████████  
+ █████   ███████████ ░░█████ ░░██████  █████     ░░█████████  █████░░████████ ░░████░████   
+░░░░░   ░░░░░░░░░░░   ░░░░░   ░░░░░░  ░░░░░       ░░░░░░░░░  ░░░░░  ░░░░░░░░   ░░░░ ░░░░    
+                                                                                                                                                                                    
 "#;
 
 #[derive(Parser, Debug)]
-#[command(name = "FemtoRS")]
+#[command(name = "AsterClaw")]
 #[command(about = "Ultra-lightweight personal AI assistant in Rust")]
 struct Cli {
     #[command(subcommand)]
@@ -201,11 +201,11 @@ fn onboard() -> Result<()> {
     let workspace = cfg.workspace_path();
     create_workspace_templates(&workspace)?;
 
-    println!("FemtoRS is ready!");
+    println!("AsterClaw is ready!");
     println!("\nNext steps:");
     println!("  1. Add your API key to {}", config_path.display());
     println!("     Get one at: https://openrouter.ai/keys");
-    println!("  2. Chat: femtors agent -m \"Hello!\"");
+    println!("  2. Chat: asterclaw agent -m \"Hello!\"");
 
     Ok(())
 }
@@ -340,9 +340,11 @@ fn gateway_cmd(_debug: bool) -> Result<()> {
     println!("Press Ctrl+C to stop");
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async move {
-        let cron_store_path = config.workspace_path().join("cron/jobs.json");
-        let cron_service = cron::CronService::new(&cron_store_path, Some(&config));
-        cron_service.start()?;
+        // Start cron runner using the shared service from agent's tool registry
+        let cron_service = agent_loop.cron_service();
+        let cron_runner = Arc::new(cron::CronRunner::new(cron_service, msg_bus.clone()));
+        cron_runner.start();
+        println!("✓ Cron scheduler started");
 
         let heartbeat_service = heartbeat::HeartbeatService::new(
             config.workspace_path(),
@@ -386,7 +388,7 @@ fn gateway_cmd(_debug: bool) -> Result<()> {
         channel_manager.stop_all().await?;
         heartbeat_service.stop().await;
         devices_service.stop();
-        cron_service.stop();
+        cron_runner.stop();
         health_server.stop().await?;
         msg_bus.close();
         agent_task.abort();
@@ -401,7 +403,7 @@ fn status_cmd() -> Result<()> {
     let config_path = config::get_config_path()?;
     let legacy_path = config::get_legacy_config_path()?;
 
-    println!("FemtoRS Status");
+    println!("AsterClaw Status");
     println!("Version: {}", env!("CARGO_PKG_VERSION"));
     println!();
 
@@ -444,7 +446,7 @@ fn status_cmd() -> Result<()> {
         println!("Groq API: {}", if has_groq { "✓" } else { "not set" });
     } else {
         println!("Config: {} ✗", config_path.display());
-        println!("\nRun 'femtors onboard' to initialize.");
+        println!("\nRun 'asterclaw onboard' to initialize.");
     }
 
     Ok(())
@@ -487,7 +489,7 @@ fn cron_cmd(command: Option<CronCommands>) -> Result<()> {
             enabled,
         }) => {
             let schedule = match (every, cron) {
-                (Some(sec), None) => cron::Schedule::Every(sec),
+                (Some(sec), None) => cron::Schedule::Every(sec * 1000),
                 (None, Some(expr)) => cron::Schedule::Cron(expr),
                 (Some(_), Some(_)) => {
                     return Err(anyhow::anyhow!(
@@ -506,6 +508,7 @@ fn cron_cmd(command: Option<CronCommands>) -> Result<()> {
                 schedule,
                 &message,
                 enabled,
+                true, // deliver directly
                 channel.as_deref(),
                 chat_id.as_deref(),
             )?;
@@ -534,13 +537,13 @@ fn cron_cmd(command: Option<CronCommands>) -> Result<()> {
         }
         _ => {
             println!("Cron commands:");
-            println!("  femtors cron list [--enabled-only]");
+            println!("  asterclaw cron list [--enabled-only]");
             println!(
-                "  femtors cron add --name <name> --message <text> [--every <sec> | --cron <expr>] [--channel <name>] [--chat-id <id>]"
+                "  asterclaw cron add --name <name> --message <text> [--every <sec> | --cron <expr>] [--channel <name>] [--chat-id <id>]"
             );
-            println!("  femtors cron remove <id>");
-            println!("  femtors cron enable <id>");
-            println!("  femtors cron disable <id>");
+            println!("  asterclaw cron remove <id>");
+            println!("  asterclaw cron enable <id>");
+            println!("  asterclaw cron disable <id>");
         }
     }
 
@@ -549,7 +552,19 @@ fn cron_cmd(command: Option<CronCommands>) -> Result<()> {
 
 fn schedule_display(schedule: &cron::Schedule) -> String {
     match schedule {
-        cron::Schedule::Every(sec) => format!("every {}s", sec),
+        cron::Schedule::At(ms) => chrono::DateTime::from_timestamp_millis(*ms)
+            .map(|dt| format!("at {}", dt.format("%Y-%m-%d %H:%M:%S UTC")))
+            .unwrap_or_else(|| format!("at {}ms", ms)),
+        cron::Schedule::Every(ms) => {
+            let sec = ms / 1000;
+            if sec >= 3600 {
+                format!("every {}h", sec / 3600)
+            } else if sec >= 60 {
+                format!("every {}m", sec / 60)
+            } else {
+                format!("every {}s", sec)
+            }
+        }
         cron::Schedule::Cron(expr) => format!("cron {}", expr),
     }
 }
@@ -605,9 +620,9 @@ fn auth_cmd(command: Option<AuthCommands>) -> Result<()> {
         }
         None => {
             println!("Auth commands:");
-            println!("  femtors auth login --provider <name> [--token <token>] [--device-code]");
-            println!("  femtors auth logout [--provider <name>]");
-            println!("  femtors auth status");
+            println!("  asterclaw auth login --provider <name> [--token <token>] [--device-code]");
+            println!("  asterclaw auth logout [--provider <name>]");
+            println!("  asterclaw auth status");
         }
     }
     Ok(())
@@ -679,11 +694,11 @@ fn skills_cmd(command: Option<SkillsCommands>) -> Result<()> {
         }
         None => {
             println!("Skills commands:");
-            println!("  femtors skills list");
-            println!("  femtors skills install <owner/repo/path>");
-            println!("  femtors skills remove <name>");
-            println!("  femtors skills search");
-            println!("  femtors skills show <name>");
+            println!("  asterclaw skills list");
+            println!("  asterclaw skills install <owner/repo/path>");
+            println!("  asterclaw skills remove <name>");
+            println!("  asterclaw skills search");
+            println!("  asterclaw skills show <name>");
         }
     }
     Ok(())

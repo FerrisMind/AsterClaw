@@ -69,6 +69,10 @@ impl AgentLoop {
         *self.channel_manager.write() = Some(manager);
     }
 
+    pub fn cron_service(&self) -> Arc<Mutex<crate::cron::CronService>> {
+        self.tools.lock().cron_service()
+    }
+
     pub async fn process_direct(&self, content: &str, session_key: &str) -> anyhow::Result<String> {
         let msg = InboundMessage {
             channel: "cli".to_string(),

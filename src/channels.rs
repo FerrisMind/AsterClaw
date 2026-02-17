@@ -440,12 +440,178 @@ fn resolve_transcriber(cfg: &Config) -> Option<GroqTranscriber> {
 }
 
 fn markdown_to_telegram_html(input: &str) -> String {
-    // Conservative conversion: escape everything first, then restore simple inline code markers.
-    let escaped = input
-        .replace('&', "&amp;")
+    let mut out = String::with_capacity(input.len() * 2);
+    let mut in_code_block = false;
+    let mut code_block_buf = String::new();
+
+    for line in input.lines() {
+        // Handle fenced code blocks
+        if line.trim_start().starts_with("```") {
+            if in_code_block {
+                // closing
+                let escaped = html_escape(&code_block_buf);
+                out.push_str("<pre>");
+                out.push_str(&escaped);
+                out.push_str("</pre>\n");
+                code_block_buf.clear();
+                in_code_block = false;
+            } else {
+                in_code_block = true;
+                code_block_buf.clear();
+            }
+            continue;
+        }
+        if in_code_block {
+            if !code_block_buf.is_empty() {
+                code_block_buf.push('\n');
+            }
+            code_block_buf.push_str(line);
+            continue;
+        }
+
+        // Headers → bold text
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed
+            .strip_prefix("### ")
+            .or_else(|| trimmed.strip_prefix("## "))
+            .or_else(|| trimmed.strip_prefix("# "))
+        {
+            out.push_str("<b>");
+            out.push_str(&convert_inline(&html_escape(rest)));
+            out.push_str("</b>\n");
+            continue;
+        }
+
+        // Blockquotes
+        if let Some(rest) = trimmed.strip_prefix("> ") {
+            out.push_str("▎ <i>");
+            out.push_str(&convert_inline(&html_escape(rest)));
+            out.push_str("</i>\n");
+            continue;
+        }
+
+        // Bullet lists: - or * → •
+        if let Some(rest) = trimmed
+            .strip_prefix("- ")
+            .or_else(|| trimmed.strip_prefix("* "))
+        {
+            out.push_str("• ");
+            out.push_str(&convert_inline(&html_escape(rest)));
+            out.push('\n');
+            continue;
+        }
+
+        // Regular line
+        out.push_str(&convert_inline(&html_escape(line)));
+        out.push('\n');
+    }
+
+    // Unclosed code block
+    if in_code_block && !code_block_buf.is_empty() {
+        out.push_str("<pre>");
+        out.push_str(&html_escape(&code_block_buf));
+        out.push_str("</pre>\n");
+    }
+
+    // Trim trailing whitespace
+    out.trim_end().to_string()
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
         .replace('<', "&lt;")
-        .replace('>', "&gt;");
-    escaped.replace("`", "")
+        .replace('>', "&gt;")
+}
+
+/// Convert inline markdown patterns to Telegram HTML.
+/// Operates on already-HTML-escaped text.
+fn convert_inline(s: &str) -> String {
+    // Links first: [text](url) → <a href="url">text</a>
+    let s = convert_links(s);
+    let s = convert_pattern(&s, "**", "<b>", "</b>");
+    let s = convert_pattern(&s, "__", "<u>", "</u>");
+    let s = convert_pattern(&s, "~~", "<s>", "</s>");
+    let s = convert_pattern(&s, "*", "<b>", "</b>");
+    let s = convert_pattern(&s, "_", "<i>", "</i>");
+    convert_inline_code(&s)
+}
+
+/// Convert markdown links [text](url) to HTML <a> tags.
+fn convert_links(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(bracket_start) = rest.find('[') {
+        result.push_str(&rest[..bracket_start]);
+        let after_bracket = &rest[bracket_start + 1..];
+        if let Some(bracket_end) = after_bracket.find("](") {
+            let text = &after_bracket[..bracket_end];
+            let after_paren = &after_bracket[bracket_end + 2..];
+            if let Some(paren_end) = after_paren.find(')') {
+                let url = &after_paren[..paren_end];
+                result.push_str(&format!("<a href=\"{}\">{}</a>", url, text));
+                rest = &after_paren[paren_end + 1..];
+                continue;
+            }
+        }
+        result.push('[');
+        rest = after_bracket;
+    }
+    result.push_str(rest);
+    result
+}
+
+/// Replace paired `marker` with open/close HTML tags.
+fn convert_pattern(input: &str, marker: &str, open: &str, close: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let mut rest = input;
+    let mut opened = false;
+
+    while let Some(pos) = rest.find(marker) {
+        result.push_str(&rest[..pos]);
+        if opened {
+            result.push_str(close);
+        } else {
+            result.push_str(open);
+        }
+        opened = !opened;
+        rest = &rest[pos + marker.len()..];
+    }
+    result.push_str(rest);
+    // If unclosed, treat marker as literal
+    if opened {
+        return input.to_string();
+    }
+    result
+}
+
+/// Convert `inline code` to <code> tags.
+fn convert_inline_code(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let mut rest = input;
+    loop {
+        match rest.find('`') {
+            Some(start) => {
+                result.push_str(&rest[..start]);
+                let after = &rest[start + 1..];
+                match after.find('`') {
+                    Some(end) => {
+                        result.push_str("<code>");
+                        result.push_str(&after[..end]);
+                        result.push_str("</code>");
+                        rest = &after[end + 1..];
+                    }
+                    None => {
+                        result.push_str(rest);
+                        return result;
+                    }
+                }
+            }
+            None => {
+                result.push_str(rest);
+                return result;
+            }
+        }
+    }
 }
 
 pub struct ChannelManager {
@@ -525,5 +691,67 @@ mod tests {
         assert!(is_allowed_sender(&["@alice".to_string()], "123456|alice"));
         assert!(is_allowed_sender(&["123456|alice".to_string()], "123456"));
         assert!(!is_allowed_sender(&["123456".to_string()], "654321|bob"));
+    }
+
+    #[test]
+    fn md_to_tg_bold_italic() {
+        assert_eq!(
+            markdown_to_telegram_html("**hello** and _world_"),
+            "<b>hello</b> and <i>world</i>"
+        );
+    }
+
+    #[test]
+    fn md_to_tg_inline_code() {
+        assert_eq!(
+            markdown_to_telegram_html("use `cargo build` here"),
+            "use <code>cargo build</code> here"
+        );
+    }
+
+    #[test]
+    fn md_to_tg_code_block() {
+        let input = "before\n```\nfn main() {}\n```\nafter";
+        let html = markdown_to_telegram_html(input);
+        assert!(html.contains("<pre>fn main() {}</pre>"));
+        assert!(html.contains("before"));
+        assert!(html.contains("after"));
+    }
+
+    #[test]
+    fn md_to_tg_header_becomes_bold() {
+        assert_eq!(markdown_to_telegram_html("# Title"), "<b>Title</b>");
+        assert_eq!(markdown_to_telegram_html("## Subtitle"), "<b>Subtitle</b>");
+    }
+
+    #[test]
+    fn md_to_tg_bullet_list() {
+        assert_eq!(
+            markdown_to_telegram_html("- first\n- second"),
+            "• first\n• second"
+        );
+    }
+
+    #[test]
+    fn md_to_tg_blockquote() {
+        let html = markdown_to_telegram_html("> quoted text");
+        assert!(html.contains("▎"));
+        assert!(html.contains("quoted text"));
+    }
+
+    #[test]
+    fn md_to_tg_escapes_html() {
+        assert_eq!(
+            markdown_to_telegram_html("a < b & c > d"),
+            "a &lt; b &amp; c &gt; d"
+        );
+    }
+
+    #[test]
+    fn md_to_tg_hyperlinks() {
+        assert_eq!(
+            markdown_to_telegram_html("See [Google](https://google.com) for more"),
+            "See <a href=\"https://google.com\">Google</a> for more"
+        );
     }
 }
