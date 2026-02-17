@@ -1068,10 +1068,7 @@ mod tests {
         let tool = registry.get("list_dir").expect("tool");
 
         let mut args = HashMap::new();
-        args.insert(
-            "path".to_string(),
-            Value::String("no_such_dir".to_string()),
-        );
+        args.insert("path".to_string(), Value::String("no_such_dir".to_string()));
         let result = tool.execute(args, "", "").await;
         assert!(result.error.is_some());
     }
@@ -1147,10 +1144,7 @@ mod tests {
 
         // Upper case should still be blocked
         let mut args = HashMap::new();
-        args.insert(
-            "command".to_string(),
-            Value::String("RM -RF /".to_string()),
-        );
+        args.insert("command".to_string(), Value::String("RM -RF /".to_string()));
         let result = tool.execute(args, "", "").await;
         assert!(result.error.is_some(), "uppercase rm -rf should be blocked");
     }
@@ -1192,10 +1186,7 @@ mod tests {
         let tool = MessageTool::new();
         let mut args = HashMap::new();
         args.insert("content".to_string(), Value::String("hi".to_string()));
-        args.insert(
-            "channel".to_string(),
-            Value::String("discord".to_string()),
-        );
+        args.insert("channel".to_string(), Value::String("discord".to_string()));
         let result = tool.execute(args, "telegram", "123").await;
         assert!(result.error.is_some());
         assert!(result.error.unwrap().contains("cross-channel"));
@@ -1404,10 +1395,7 @@ mod tests {
     async fn web_search_ddg_respects_count_limit() {
         let tool = WebSearchTool::from_config(&WebToolsConfig::default());
         let mut args = HashMap::new();
-        args.insert(
-            "query".to_string(),
-            Value::String("wikipedia".to_string()),
-        );
+        args.insert("query".to_string(), Value::String("wikipedia".to_string()));
         args.insert("count".to_string(), Value::Number(2.into()));
         let result = tool.execute(args, "", "").await;
         assert!(result.error.is_none(), "{:?}", result.error);
@@ -1427,10 +1415,7 @@ mod tests {
     async fn web_search_ddg_decodes_redirect_urls() {
         let tool = WebSearchTool::from_config(&WebToolsConfig::default());
         let mut args = HashMap::new();
-        args.insert(
-            "query".to_string(),
-            Value::String("GitHub".to_string()),
-        );
+        args.insert("query".to_string(), Value::String("GitHub".to_string()));
         args.insert("count".to_string(), Value::Number(3.into()));
         let result = tool.execute(args, "", "").await;
         assert!(result.error.is_none(), "{:?}", result.error);

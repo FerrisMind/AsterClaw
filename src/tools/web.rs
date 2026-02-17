@@ -133,8 +133,7 @@ impl WebSearchTool {
         // Two-step approach: find ALL <a> tags, then filter for result__a.
         // This avoids depending on attribute ordering (class before/after href).
         static RE_ANCHOR: LazyLock<Regex> = LazyLock::new(|| {
-            Regex::new(r#"<a\s([^>]*?)href="([^"]+)"([^>]*)>([\s\S]*?)</a>"#)
-                .expect("valid regex")
+            Regex::new(r#"<a\s([^>]*?)href="([^"]+)"([^>]*)>([\s\S]*?)</a>"#).expect("valid regex")
         });
         static RE_SNIPPET: LazyLock<Regex> = LazyLock::new(|| {
             Regex::new(r#"<a\s+class="result__snippet[^"]*"[^>]*>([\s\S]*?)</a>"#)
