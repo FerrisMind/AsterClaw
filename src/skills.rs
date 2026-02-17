@@ -24,7 +24,7 @@ impl SkillsLoader {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         Self::new_with_paths(
             workspace.join("skills"),
-            home.join(".picors").join("skills"),
+            home.join(".femtors").join("skills"),
             cwd.join("skills"),
         )
     }
@@ -164,7 +164,7 @@ impl SkillInstaller {
     }
 
     pub async fn list_available_skills(&self) -> anyhow::Result<Vec<AvailableSkill>> {
-        let url = "https://raw.githubusercontent.com/sipeed/picors-skills/main/skills.json";
+        let url = "https://raw.githubusercontent.com/sipeed/femtors-skills/main/skills.json";
         let body = reqwest::get(url).await?.text().await?;
         let parsed: Vec<AvailableSkill> = serde_json::from_str(&body)?;
         Ok(parsed)

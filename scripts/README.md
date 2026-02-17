@@ -2,11 +2,11 @@
 
 ## NFR Harness
 
-`nfr-harness.ps1` compares `picors` against a Go `picoclaw` baseline binary.
+`nfr-harness.ps1` compares `femtors` against a Go `picoclaw` baseline binary.
 
 What it does:
 
-1. Builds `picors` (`cargo build --release`).
+1. Builds `femtors` (`cargo build --release`).
 2. Builds `picoclaw` from `references/picoclaw` (`go build ./cmd/picoclaw`).
 3. Uses a temporary HOME (`target/nfr/home`) for isolated onboarding/config.
 4. Starts each gateway, waits for `/ready`, records:
@@ -26,7 +26,7 @@ pwsh scripts/nfr-harness.ps1
 Notes:
 
 - Requires `go` and `cargo` in `PATH`.
-- Use `-SkipBuild` only if `target/release/picors.exe` and `target/nfr/picoclaw.exe` already exist.
+- Use `-SkipBuild` only if `target/release/femtors.exe` and `target/nfr/picoclaw.exe` already exist.
 
 ## Optional: PGO Build (Manual)
 

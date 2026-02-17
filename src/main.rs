@@ -1,4 +1,4 @@
-//! PicoRS - Ultra-lightweight personal AI agent
+//! FemtoRS - Ultra-lightweight personal AI agent
 //! Rust port from Go version
 
 mod agent;
@@ -27,9 +27,21 @@ use clap::{Parser, Subcommand};
 use std::env;
 use std::sync::Arc;
 
+const BANNER: &str = r#"
+ ███████████                           █████             ███████████    █████████ 
+▒▒███▒▒▒▒▒▒█                          ▒▒███             ▒▒███▒▒▒▒▒███  ███▒▒▒▒▒███
+ ▒███   █ ▒   ██████  █████████████   ███████    ██████  ▒███    ▒███ ▒███    ▒▒▒ 
+ ▒███████    ███▒▒███▒▒███▒▒███▒▒███ ▒▒▒███▒    ███▒▒███ ▒██████████  ▒▒█████████ 
+ ▒███▒▒▒█   ▒███████  ▒███ ▒███ ▒███   ▒███    ▒███ ▒███ ▒███▒▒▒▒▒███  ▒▒▒▒▒▒▒▒███
+ ▒███  ▒    ▒███▒▒▒   ▒███ ▒███ ▒███   ▒███ ███▒███ ▒███ ▒███    ▒███  ███    ▒███
+ █████      ▒▒██████  █████▒███ █████  ▒▒█████ ▒▒██████  █████   █████▒▒█████████ 
+▒▒▒▒▒        ▒▒▒▒▒▒  ▒▒▒▒▒ ▒▒▒ ▒▒▒▒▒    ▒▒▒▒▒   ▒▒▒▒▒▒  ▒▒▒▒▒   ▒▒▒▒▒  ▒▒▒▒▒▒▒▒▒  
+
+"#;
+
 #[derive(Parser, Debug)]
-#[command(name = "picors")]
-#[command(about = "Ultra-lightweight personal AI assistant")]
+#[command(name = "FemtoRS")]
+#[command(about = "Ultra-lightweight personal AI assistant in Rust")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -150,7 +162,8 @@ fn main() -> Result<()> {
         Commands::Gateway { debug } => gateway_cmd(debug),
         Commands::Status => status_cmd(),
         Commands::Version => {
-            println!("🦞 picors {}", env!("CARGO_PKG_VERSION"));
+            print!("{}", BANNER);
+            println!("  v{}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
         Commands::Cron { command } => cron_cmd(command),
@@ -188,11 +201,11 @@ fn onboard() -> Result<()> {
     let workspace = cfg.workspace_path();
     create_workspace_templates(&workspace)?;
 
-    println!("🦞 picors is ready!");
+    println!("FemtoRS is ready!");
     println!("\nNext steps:");
     println!("  1. Add your API key to {}", config_path.display());
     println!("     Get one at: https://openrouter.ai/keys");
-    println!("  2. Chat: picors agent -m \"Hello!\"");
+    println!("  2. Chat: femtors agent -m \"Hello!\"");
 
     Ok(())
 }
@@ -230,7 +243,7 @@ fn agent_cmd(message: Option<String>, session: Option<String>) -> Result<()> {
     // Create agent loop
     let agent_loop = Arc::new(agent::AgentLoop::new(&config, &msg_bus, provider.clone()));
 
-    println!("🦞 Agent initialized");
+    println!("Agent initialized");
     println!(
         "  Tools: {} loaded",
         agent_loop.get_startup_info()["tools"]["count"]
@@ -244,10 +257,10 @@ fn agent_cmd(message: Option<String>, session: Option<String>) -> Result<()> {
         let response =
             runtime.block_on(async { agent_loop.process_direct(&msg, &session_key).await })?;
 
-        println!("\n🦞 {}", response);
+        println!("\n{}", response);
     } else {
         // Interactive mode
-        println!("🦞 Interactive mode (Ctrl+C to exit)\n");
+        println!("Interactive mode (Ctrl+C to exit)\n");
         interactive_mode(&agent_loop, &session_key)?;
     }
 
@@ -260,7 +273,7 @@ fn interactive_mode(agent_loop: &Arc<agent::AgentLoop>, session_key: &str) -> Re
     let runtime = tokio::runtime::Runtime::new()?;
 
     loop {
-        print!("🦞 You: ");
+        print!("You: ");
         io::stdout().flush()?;
 
         let mut input = String::new();
@@ -280,7 +293,7 @@ fn interactive_mode(agent_loop: &Arc<agent::AgentLoop>, session_key: &str) -> Re
             runtime.block_on(async { agent_loop.process_direct(input, session_key).await });
 
         match response {
-            Ok(resp) => println!("\n🦞 {}\n", resp),
+            Ok(resp) => println!("\n{}\n", resp),
             Err(e) => println!("Error: {}", e),
         }
     }
@@ -301,8 +314,11 @@ fn gateway_cmd(_debug: bool) -> Result<()> {
     // Create agent loop
     let agent_loop = Arc::new(agent::AgentLoop::new(&config, &msg_bus, provider.clone()));
 
+    print!("{}", BANNER);
+    println!("  v{}\n", env!("CARGO_PKG_VERSION"));
+
     // Print status
-    println!("\n📦 Agent Status:");
+    println!("📦 Agent Status:");
     let startup_info = agent_loop.get_startup_info();
     println!("  • Tools: {} loaded", startup_info["tools"]["count"]);
 
@@ -385,7 +401,7 @@ fn status_cmd() -> Result<()> {
     let config_path = config::get_config_path()?;
     let legacy_path = config::get_legacy_config_path()?;
 
-    println!("🦞 picors Status");
+    println!("FemtoRS Status");
     println!("Version: {}", env!("CARGO_PKG_VERSION"));
     println!();
 
@@ -428,7 +444,7 @@ fn status_cmd() -> Result<()> {
         println!("Groq API: {}", if has_groq { "✓" } else { "not set" });
     } else {
         println!("Config: {} ✗", config_path.display());
-        println!("\nRun 'picors onboard' to initialize.");
+        println!("\nRun 'femtors onboard' to initialize.");
     }
 
     Ok(())
@@ -518,13 +534,13 @@ fn cron_cmd(command: Option<CronCommands>) -> Result<()> {
         }
         _ => {
             println!("Cron commands:");
-            println!("  picors cron list [--enabled-only]");
+            println!("  femtors cron list [--enabled-only]");
             println!(
-                "  picors cron add --name <name> --message <text> [--every <sec> | --cron <expr>] [--channel <name>] [--chat-id <id>]"
+                "  femtors cron add --name <name> --message <text> [--every <sec> | --cron <expr>] [--channel <name>] [--chat-id <id>]"
             );
-            println!("  picors cron remove <id>");
-            println!("  picors cron enable <id>");
-            println!("  picors cron disable <id>");
+            println!("  femtors cron remove <id>");
+            println!("  femtors cron enable <id>");
+            println!("  femtors cron disable <id>");
         }
     }
 
@@ -589,9 +605,9 @@ fn auth_cmd(command: Option<AuthCommands>) -> Result<()> {
         }
         None => {
             println!("Auth commands:");
-            println!("  picors auth login --provider <name> [--token <token>] [--device-code]");
-            println!("  picors auth logout [--provider <name>]");
-            println!("  picors auth status");
+            println!("  femtors auth login --provider <name> [--token <token>] [--device-code]");
+            println!("  femtors auth logout [--provider <name>]");
+            println!("  femtors auth status");
         }
     }
     Ok(())
@@ -663,11 +679,11 @@ fn skills_cmd(command: Option<SkillsCommands>) -> Result<()> {
         }
         None => {
             println!("Skills commands:");
-            println!("  picors skills list");
-            println!("  picors skills install <owner/repo/path>");
-            println!("  picors skills remove <name>");
-            println!("  picors skills search");
-            println!("  picors skills show <name>");
+            println!("  femtors skills list");
+            println!("  femtors skills install <owner/repo/path>");
+            println!("  femtors skills remove <name>");
+            println!("  femtors skills search");
+            println!("  femtors skills show <name>");
         }
     }
     Ok(())

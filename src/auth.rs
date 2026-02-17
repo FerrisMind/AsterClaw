@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 fn auth_home_dir() -> PathBuf {
-    if let Ok(path) = std::env::var("PICORS_HOME") {
+    if let Ok(path) = std::env::var("FEMTORS_HOME") {
         let trimmed = path.trim();
         if !trimmed.is_empty() {
             return PathBuf::from(trimmed);
@@ -53,12 +53,12 @@ impl AuthCredential {
 
 fn primary_store_path() -> PathBuf {
     let home = auth_home_dir();
-    home.join(".picors").join("credentials.json")
+    home.join(".femtors").join("credentials.json")
 }
 
 fn legacy_store_path() -> PathBuf {
     let home = auth_home_dir();
-    home.join(".picors").join("credentials.json")
+    home.join(".femtors").join("credentials.json")
 }
 
 fn load_store_from_path(path: &PathBuf) -> Result<CredentialStore> {
@@ -132,13 +132,13 @@ pub fn show_status() -> Result<()> {
 pub fn login_openai(_device_code: bool) -> Result<()> {
     println!("OpenAI login:");
     println!("1. Get API key from https://platform.openai.com/api-keys");
-    println!("2. Run: picors auth login --provider openai --token <your-key>");
+    println!("2. Run: femtors auth login --provider openai --token <your-key>");
     Ok(())
 }
 
 pub fn login_paste_token(provider: &str) -> Result<()> {
     println!("Enter {provider} API key: ");
-    println!("Usage: picors auth login --provider {provider} --token <token>");
+    println!("Usage: femtors auth login --provider {provider} --token <token>");
     Ok(())
 }
 
@@ -156,17 +156,17 @@ mod tests {
     }
 
     #[test]
-    fn write_uses_picors_path() {
+    fn write_uses_femtors_path() {
         let _g = lock();
         let home = tempfile::tempdir().expect("tmp home");
         // SAFETY: guarded by lock for process-wide env mutation.
-        unsafe { std::env::set_var("PICORS_HOME", home.path()) };
+        unsafe { std::env::set_var("FEMTORS_HOME", home.path()) };
 
         let cred = AuthCredential::from_token("openai", "key-1".to_string(), None);
         set_credential("openai", cred).expect("set cred");
 
-        assert!(home.path().join(".picors/credentials.json").exists());
-        assert!(!home.path().join(".picors/credentials.json").exists());
+        assert!(home.path().join(".femtors/credentials.json").exists());
+        assert!(!home.path().join(".picoclaw/credentials.json").exists());
     }
 
     #[test]
@@ -174,9 +174,9 @@ mod tests {
         let _g = lock();
         let home = tempfile::tempdir().expect("tmp home");
         // SAFETY: guarded by lock for process-wide env mutation.
-        unsafe { std::env::set_var("PICORS_HOME", home.path()) };
+        unsafe { std::env::set_var("FEMTORS_HOME", home.path()) };
 
-        let legacy_dir = home.path().join(".picors");
+        let legacy_dir = home.path().join(".femtors");
         std::fs::create_dir_all(&legacy_dir).expect("mkdir legacy");
         let mut creds = HashMap::new();
         creds.insert(

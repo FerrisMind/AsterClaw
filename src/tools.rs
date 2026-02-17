@@ -13,6 +13,8 @@ use regex::Regex;
 use serde_json::Value;
 use url::Url;
 
+use crate::config::WebToolsConfig;
+
 use crate::bus::{InboundMessage, MessageBus};
 use crate::cron::{CronService, Schedule};
 use crate::providers::ToolDefinition;
@@ -310,15 +312,26 @@ pub struct ToolRegistry {
     restrict_to_workspace: bool,
     tools: HashMap<String, Arc<dyn Tool>>,
     subagent_manager: Arc<RwLock<Option<Arc<SubagentManager>>>>,
+    web_config: WebToolsConfig,
 }
 
 impl ToolRegistry {
+    #[allow(dead_code)] // Used by tests
     pub fn new(workspace: PathBuf, restrict_to_workspace: bool) -> Self {
+        Self::with_web_config(workspace, restrict_to_workspace, WebToolsConfig::default())
+    }
+
+    pub fn with_web_config(
+        workspace: PathBuf,
+        restrict_to_workspace: bool,
+        web_config: WebToolsConfig,
+    ) -> Self {
         let mut registry = Self {
             workspace,
             restrict_to_workspace,
             tools: HashMap::new(),
             subagent_manager: Arc::new(RwLock::new(None)),
+            web_config,
         };
         registry.register_builtin_tools();
         registry
@@ -346,7 +359,7 @@ impl ToolRegistry {
             self.restrict_to_workspace,
         ));
         self.register(ExecTool::new(self.workspace.clone()));
-        self.register(WebSearchTool::new(5));
+        self.register(WebSearchTool::from_config(&self.web_config));
         self.register(WebFetchTool::new(50_000));
         self.register(MessageTool::new());
         self.register(SpawnTool::new(self.subagent_manager.clone()));
@@ -389,7 +402,7 @@ impl ToolRegistry {
             .values()
             .map(|tool| ToolDefinition {
                 tool_type: "function".to_string(),
-                function: crate::providers::ToolFunctionDefinition::Simple {
+                function: crate::providers::ToolFunctionDefinition {
                     name: tool.name().to_string(),
                     description: tool.description().to_string(),
                     parameters: tool.parameters(),
@@ -829,13 +842,43 @@ impl Tool for ExecTool {
             _ => return ToolResult::error("Missing required parameter: command"),
         };
 
+        // Normalize whitespace to prevent trivial bypass (e.g. "r m  -rf").
+        let command_normalized = command
+            .to_ascii_lowercase()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+
         let dangerous = [
-            "rm -rf", "del /f", "rmdir /s", "format", "mkfs", "diskpart", "dd if=", "shutdown",
-            "reboot", "poweroff",
+            "rm -rf",
+            "rm -fr",
+            "del /f",
+            "del /s",
+            "rmdir /s",
+            "format c:",
+            "mkfs",
+            "diskpart",
+            "dd if=",
+            "shutdown",
+            "reboot",
+            "poweroff",
+            "halt",
+            "init 0",
+            "init 6",
+            "chmod 777",
+            "chmod -r 777",
+            "chown -r",
+            "> /dev/sd",
+            "> /dev/null",
+            ":(){ :|:&",
+            "| sh",
+            "| bash",
+            "| zsh",
+            "|sh",
+            "|bash",
         ];
-        let command_lower = command.to_ascii_lowercase();
         for marker in dangerous {
-            if command_lower.contains(marker) {
+            if command_normalized.contains(marker) {
                 return ToolResult::error("Command blocked by safety guard");
             }
         }
@@ -869,17 +912,181 @@ impl Tool for ExecTool {
     }
 }
 
+/// Web search provider strategy.
+#[derive(Debug, Clone)]
+enum SearchProvider {
+    /// Brave Search API (requires API key).
+    Brave { api_key: String, max_results: usize },
+    /// DuckDuckGo HTML scraping (no key required).
+    DuckDuckGo { max_results: usize },
+}
+
 pub struct WebSearchTool {
-    max_results: usize,
+    provider: SearchProvider,
     client: reqwest::Client,
 }
 
 impl WebSearchTool {
-    pub fn new(max_results: usize) -> Self {
+    /// Build from config — priority: Brave > DuckDuckGo > disabled.
+    pub fn from_config(web: &WebToolsConfig) -> Self {
+        let brave_key = web
+            .brave
+            .api_key
+            .clone()
+            .or_else(|| std::env::var("BRAVE_API_KEY").ok())
+            .filter(|k| !k.trim().is_empty());
+
+        let provider = if let Some(key) = brave_key.filter(|_| web.brave.enabled) {
+            SearchProvider::Brave {
+                api_key: key,
+                max_results: (web.brave.max_results as usize).clamp(1, 10),
+            }
+        } else if web.duckduckgo.enabled {
+            SearchProvider::DuckDuckGo {
+                max_results: (web.duckduckgo.max_results as usize).clamp(1, 10),
+            }
+        } else {
+            // Default fallback: DDG always works without a key
+            SearchProvider::DuckDuckGo { max_results: 5 }
+        };
+
         Self {
-            max_results: max_results.clamp(1, 10),
+            provider,
             client: reqwest::Client::new(),
         }
+    }
+
+    /// Brave Search API call.
+    async fn search_brave(
+        &self,
+        query: &str,
+        api_key: &str,
+        count: usize,
+    ) -> Result<String, String> {
+        let encoded: String = url::form_urlencoded::byte_serialize(query.as_bytes()).collect();
+        let url = format!(
+            "https://api.search.brave.com/res/v1/web/search?q={}&count={}",
+            encoded, count
+        );
+        let resp = self
+            .client
+            .get(&url)
+            .header("Accept", "application/json")
+            .header("X-Subscription-Token", api_key)
+            .send()
+            .await
+            .map_err(|e| format!("Brave request failed: {e}"))?;
+
+        if !resp.status().is_success() {
+            return Err(format!("Brave API error: {}", resp.status()));
+        }
+
+        let body: Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("Brave JSON parse failed: {e}"))?;
+
+        let results = body.pointer("/web/results").and_then(|v| v.as_array());
+
+        let mut lines = vec![format!("Results for: {}", query)];
+        if let Some(items) = results {
+            for (i, item) in items.iter().take(count).enumerate() {
+                let title = item.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                let url = item.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                let desc = item
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                lines.push(format!("{}. {}\n   {}", i + 1, title, url));
+                if !desc.is_empty() {
+                    lines.push(format!("   {}", desc));
+                }
+            }
+        }
+        if lines.len() == 1 {
+            lines.push("No results".to_string());
+        }
+        Ok(lines.join("\n"))
+    }
+
+    /// DuckDuckGo HTML scraping (no API key needed).
+    async fn search_ddg(&self, query: &str, count: usize) -> Result<String, String> {
+        let encoded: String = url::form_urlencoded::byte_serialize(query.as_bytes()).collect();
+        let url = format!("https://html.duckduckgo.com/html/?q={}", encoded);
+        let resp = self.client
+            .get(&url)
+            .header(
+                "User-Agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            )
+            .send()
+            .await
+            .map_err(|e| format!("DDG request failed: {e}"))?;
+
+        let html = resp
+            .text()
+            .await
+            .map_err(|e| format!("DDG response read failed: {e}"))?;
+
+        static RE_LINK: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(
+                r#"<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)</a>"#,
+            )
+            .expect("valid regex")
+        });
+        static RE_SNIPPET: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r#"<a\s+class="result__snippet[^"]*".*?>([\s\S]*?)</a>"#)
+                .expect("valid regex")
+        });
+        static RE_STRIP: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r"<[^>]+>").expect("valid regex"));
+
+        let link_caps: Vec<_> = RE_LINK.captures_iter(&html).collect();
+        let snippet_caps: Vec<_> = RE_SNIPPET.captures_iter(&html).collect();
+
+        let mut lines = vec![format!("Results for: {} (via DuckDuckGo)", query)];
+        let mut seen = 0usize;
+
+        for (i, caps) in link_caps.iter().enumerate() {
+            if seen >= count {
+                break;
+            }
+            let raw_url = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            let raw_title = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+            let title = RE_STRIP.replace_all(raw_title, "").trim().to_string();
+            if title.is_empty() {
+                continue;
+            }
+
+            // Decode DDG redirect URLs (uddg= parameter)
+            let final_url = if raw_url.contains("uddg=") {
+                url::form_urlencoded::parse(raw_url.as_bytes())
+                    .find(|(k, _)| k == "uddg")
+                    .map(|(_, v)| v.to_string())
+                    .unwrap_or_else(|| raw_url.to_string())
+            } else {
+                raw_url.to_string()
+            };
+
+            lines.push(format!("{}. {}\n   {}", seen + 1, title, final_url));
+
+            // Attach snippet if available
+            if let Some(snippet_cap) = snippet_caps.get(i) {
+                let snippet = RE_STRIP
+                    .replace_all(snippet_cap.get(1).map(|m| m.as_str()).unwrap_or(""), "")
+                    .trim()
+                    .to_string();
+                if !snippet.is_empty() {
+                    lines.push(format!("   {}", snippet));
+                }
+            }
+            seen += 1;
+        }
+
+        if seen == 0 {
+            lines.push("No results".to_string());
+        }
+        Ok(lines.join("\n"))
     }
 }
 
@@ -889,14 +1096,14 @@ impl Tool for WebSearchTool {
         "web_search"
     }
     fn description(&self) -> &str {
-        "Search the web and return titles/urls/snippets"
+        "Search the web for current information. Returns titles, URLs, and snippets from search results."
     }
     fn parameters(&self) -> Value {
         serde_json::json!({
             "type": "object",
             "properties": {
-                "query": { "type": "string" },
-                "count": { "type": "integer", "minimum": 1, "maximum": 10 }
+                "query": { "type": "string", "description": "Search query" },
+                "count": { "type": "integer", "description": "Number of results (1-10)", "minimum": 1, "maximum": 10 }
             },
             "required": ["query"]
         })
@@ -907,62 +1114,29 @@ impl Tool for WebSearchTool {
             Some(v) if !v.is_empty() => v,
             _ => return ToolResult::error("query is required"),
         };
-        let count = arg_i64(&args, "count")
-            .map(|v| v.clamp(1, 10) as usize)
-            .unwrap_or(self.max_results);
 
-        let encoded_query: String =
-            url::form_urlencoded::byte_serialize(query.as_bytes()).collect();
-        let url = format!("https://html.duckduckgo.com/html/?q={}", encoded_query);
-        let resp = match self
-            .client
-            .get(&url)
-            .header("User-Agent", "Mozilla/5.0")
-            .send()
-            .await
-        {
-            Ok(v) => v,
-            Err(e) => return ToolResult::error(&format!("search request failed: {}", e)),
+        let result = match &self.provider {
+            SearchProvider::Brave {
+                api_key,
+                max_results,
+            } => {
+                let count = arg_i64(&args, "count")
+                    .map(|v| v.clamp(1, 10) as usize)
+                    .unwrap_or(*max_results);
+                self.search_brave(&query, api_key, count).await
+            }
+            SearchProvider::DuckDuckGo { max_results } => {
+                let count = arg_i64(&args, "count")
+                    .map(|v| v.clamp(1, 10) as usize)
+                    .unwrap_or(*max_results);
+                self.search_ddg(&query, count).await
+            }
         };
 
-        let html = match resp.text().await {
-            Ok(v) => v,
-            Err(e) => return ToolResult::error(&format!("search response read failed: {}", e)),
-        };
-
-        static RE_RESULT: LazyLock<Regex> = LazyLock::new(|| {
-            Regex::new(
-                r#"<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)</a>"#,
-            )
-            .expect("valid regex")
-        });
-        static RE_STRIP: LazyLock<Regex> =
-            LazyLock::new(|| Regex::new(r"<[^>]+>").expect("valid regex"));
-        let re = &*RE_RESULT;
-        let strip = &*RE_STRIP;
-
-        let mut lines = vec![format!("Results for: {}", query)];
-        let mut seen = 0usize;
-        for caps in re.captures_iter(&html) {
-            if seen >= count {
-                break;
-            }
-            let raw_url = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-            let raw_title = caps.get(2).map(|m| m.as_str()).unwrap_or("");
-            let title = strip.replace_all(raw_title, "").trim().to_string();
-            if title.is_empty() {
-                continue;
-            }
-            lines.push(format!("{}. {}\n   {}", seen + 1, title, raw_url));
-            seen += 1;
+        match result {
+            Ok(out) => ToolResult::new(&out).with_for_llm(&out).with_for_user(&out),
+            Err(e) => ToolResult::error(&format!("search failed: {}", e)),
         }
-
-        if seen == 0 {
-            lines.push("No results".to_string());
-        }
-
-        let out = lines.join("\n");
-        ToolResult::new(&out).with_for_llm(&out).with_for_user(&out)
     }
 }
 

@@ -75,7 +75,7 @@ impl ContextBuilder {
 
         let mut sections = Vec::new();
         sections.push(format!(
-            "# picors 🦞\n\nYou are picors, a helpful AI assistant.\n\n## Current Time\n{}\n\n## Runtime\n{}\n\n## Workspace\nYour workspace is at: {}\n- Memory: {}/memory/MEMORY.md\n- Daily Notes: {}/memory/YYYYMM/YYYYMMDD.md\n- Skills: {}/skills/{{skill-name}}/SKILL.md",
+            "# femtors 🦞\n\nYou are femtors, a helpful AI assistant.\n\n## Current Time\n{}\n\n## Runtime\n{}\n\n## Workspace\nYour workspace is at: {}\n- Memory: {}/memory/MEMORY.md\n- Daily Notes: {}/memory/YYYYMM/YYYYMMDD.md\n- Skills: {}/skills/{{skill-name}}/SKILL.md",
             now,
             runtime,
             self.workspace.display(),

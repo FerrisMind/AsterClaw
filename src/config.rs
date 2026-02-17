@@ -1,4 +1,4 @@
-//! Configuration module for picors
+//! Configuration module for femtors
 //! Ported from Go version
 
 use std::path::{Path, PathBuf};
@@ -65,7 +65,7 @@ impl Default for AgentDefaults {
 }
 
 fn default_workspace() -> String {
-    "~/.picors/workspace".to_string()
+    "~/.femtors/workspace".to_string()
 }
 
 fn default_true() -> bool {
@@ -265,20 +265,20 @@ impl Default for DevicesConfig {
     }
 }
 
-/// Get the config path (~/.picors/config.json)
+/// Get the config path (~/.femtors/config.json)
 pub fn get_config_path() -> anyhow::Result<PathBuf> {
     let home = resolve_home_dir()?;
-    Ok(home.join(".picors").join("config.json"))
+    Ok(home.join(".femtors").join("config.json"))
 }
 
-/// Get legacy config path (~/.picors/config.json).
+/// Get legacy config path (~/.picoclaw/config.json).
 pub fn get_legacy_config_path() -> anyhow::Result<PathBuf> {
     let home = resolve_home_dir()?;
-    Ok(home.join(".picors").join("config.json"))
+    Ok(home.join(".picoclaw").join("config.json"))
 }
 
 fn resolve_home_dir() -> anyhow::Result<PathBuf> {
-    if let Ok(path) = std::env::var("PICORS_HOME") {
+    if let Ok(path) = std::env::var("FEMTORS_HOME") {
         let trimmed = path.trim();
         if !trimmed.is_empty() {
             return Ok(PathBuf::from(trimmed));
@@ -295,7 +295,7 @@ pub fn load_config(path: &Path) -> anyhow::Result<Config> {
         return Ok(config);
     }
 
-    // Dual compatibility mode: fall back to legacy ~/.picors/config.json
+    // Dual compatibility mode: fall back to legacy ~/.femtors/config.json
     let legacy = get_legacy_config_path()?;
     if legacy.exists() {
         let data = std::fs::read_to_string(&legacy)?;
@@ -325,10 +325,10 @@ impl Config {
     }
 }
 
-/// Expand ~ to home directory
+/// Expand ~ to home directory (respects `FEMTORS_HOME` env var).
 fn expand_home(path: &str) -> PathBuf {
     if path.starts_with('~')
-        && let Some(home) = dirs::home_dir()
+        && let Ok(home) = resolve_home_dir()
     {
         if path.len() > 1 {
             return home.join(&path[2..]);

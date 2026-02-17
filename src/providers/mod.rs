@@ -58,7 +58,11 @@ impl HttpProvider {
         tools: Option<&[ToolDefinition]>,
         options: &HashMap<String, serde_json::Value>,
     ) -> Result<LlmResponse> {
-        let client = reqwest::Client::new();
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .build()
+            .unwrap_or_default();
         let messages_json: Vec<serde_json::Value> = messages
             .iter()
             .map(normalize_message_for_provider)
@@ -329,8 +333,8 @@ fn provider_meta<'a>(config: &'a Config, provider_name: &str) -> Result<Provider
         )),
         "openrouter" => {
             let mut headers = HashMap::new();
-            headers.insert("HTTP-Referer".to_string(), "https://picors.ai".to_string());
-            headers.insert("X-Title".to_string(), "picors".to_string());
+            headers.insert("HTTP-Referer".to_string(), "https://femtors.ai".to_string());
+            headers.insert("X-Title".to_string(), "femtors".to_string());
             Ok((
                 &config.providers.openrouter,
                 "https://openrouter.ai/api/v1",

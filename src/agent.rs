@@ -34,9 +34,10 @@ impl AgentLoop {
         let workspace = config.workspace_path();
         let sessions = Arc::new(Mutex::new(SessionManager::new(workspace.join("sessions"))));
         let state = Arc::new(Mutex::new(StateManager::new(workspace.clone())));
-        let tool_registry = ToolRegistry::new(
+        let tool_registry = ToolRegistry::with_web_config(
             workspace.clone(),
             config.agents.defaults.restrict_to_workspace,
+            config.tools.web.clone(),
         );
         let subagent_manager = Arc::new(SubagentManager::new(
             provider.clone(),

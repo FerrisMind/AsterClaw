@@ -7,18 +7,37 @@ use axum::routing::post;
 use axum::{Json, Router};
 use serde_json::json;
 
-fn picors_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_picors"))
+fn femtors_bin() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_femtors"))
 }
 
-fn run_picors(home: &Path, args: &[&str]) -> anyhow::Result<std::process::Output> {
-    let out = Command::new(picors_bin())
+fn run_femtors(home: &Path, args: &[&str]) -> anyhow::Result<std::process::Output> {
+    let mut child = Command::new(femtors_bin())
         .args(args)
-        .env("PICORS_HOME", home)
+        .env("FEMTORS_HOME", home)
         .env("HOME", home)
         .env("USERPROFILE", home)
-        .output()?;
-    Ok(out)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        match child.try_wait()? {
+            Some(_status) => return Ok(child.wait_with_output()?),
+            None if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let out = child.wait_with_output()?;
+                anyhow::bail!(
+                    "femtors timed out after 15s.\nstdout: {}\nstderr: {}",
+                    String::from_utf8_lossy(&out.stdout),
+                    String::from_utf8_lossy(&out.stderr)
+                );
+            }
+            None => std::thread::sleep(Duration::from_millis(50)),
+        }
+    }
 }
 
 fn write_config(
@@ -27,7 +46,7 @@ fn write_config(
     api_base: Option<&str>,
     gateway_port: i32,
 ) -> anyhow::Result<()> {
-    let cfg_dir = home.join(".picors");
+    let cfg_dir = home.join(".femtors");
     std::fs::create_dir_all(&cfg_dir)?;
     std::fs::create_dir_all(workspace)?;
     let cfg = json!({
@@ -109,18 +128,18 @@ fn e2e_onboard_and_status() -> anyhow::Result<()> {
     let tmp = tempfile::tempdir()?;
     let home = tmp.path();
 
-    let onboard = run_picors(home, &["onboard"])?;
+    let onboard = run_femtors(home, &["onboard"])?;
     assert!(
         onboard.status.success(),
         "{}",
         String::from_utf8_lossy(&onboard.stderr)
     );
 
-    assert!(home.join(".picors/config.json").exists());
-    assert!(home.join(".picors/workspace/memory/MEMORY.md").exists());
-    assert!(home.join(".picors/workspace/cron").exists());
+    assert!(home.join(".femtors/config.json").exists());
+    assert!(home.join(".femtors/workspace/memory/MEMORY.md").exists());
+    assert!(home.join(".femtors/workspace/cron").exists());
 
-    let status = run_picors(home, &["status"])?;
+    let status = run_femtors(home, &["status"])?;
     assert!(status.status.success());
     let stdout = String::from_utf8_lossy(&status.stdout);
     assert!(stdout.contains("Config:"));
@@ -133,7 +152,7 @@ fn e2e_auth_primary_and_legacy_fallback() -> anyhow::Result<()> {
     let tmp = tempfile::tempdir()?;
     let home = tmp.path();
 
-    let legacy_dir = home.join(".picors");
+    let legacy_dir = home.join(".femtors");
     std::fs::create_dir_all(&legacy_dir)?;
     std::fs::write(
         legacy_dir.join("credentials.json"),
@@ -153,11 +172,11 @@ fn e2e_auth_primary_and_legacy_fallback() -> anyhow::Result<()> {
         .to_string(),
     )?;
 
-    let status_legacy = run_picors(home, &["auth", "status"])?;
+    let status_legacy = run_femtors(home, &["auth", "status"])?;
     assert!(status_legacy.status.success());
     assert!(String::from_utf8_lossy(&status_legacy.stdout).contains("openai"));
 
-    let login = run_picors(
+    let login = run_femtors(
         home,
         &[
             "auth",
@@ -169,11 +188,11 @@ fn e2e_auth_primary_and_legacy_fallback() -> anyhow::Result<()> {
         ],
     )?;
     assert!(login.status.success());
-    assert!(home.join(".picors/credentials.json").exists());
+    assert!(home.join(".femtors/credentials.json").exists());
 
-    let logout = run_picors(home, &["auth", "logout", "--provider", "openai"])?;
+    let logout = run_femtors(home, &["auth", "logout", "--provider", "openai"])?;
     assert!(logout.status.success());
-    let status_after = run_picors(home, &["auth", "status"])?;
+    let status_after = run_femtors(home, &["auth", "status"])?;
     assert!(status_after.status.success());
     assert!(String::from_utf8_lossy(&status_after.stdout).contains("No authenticated providers."));
     Ok(())
@@ -186,7 +205,7 @@ fn e2e_cron_lifecycle() -> anyhow::Result<()> {
     let workspace = home.join("ws");
     write_config(home, &workspace, None, 18790)?;
 
-    let add = run_picors(
+    let add = run_femtors(
         home,
         &[
             "cron",
@@ -223,16 +242,16 @@ fn e2e_cron_lifecycle() -> anyhow::Result<()> {
         "cron add output did not contain id: {added}"
     );
 
-    let list = run_picors(home, &["cron", "list"])?;
+    let list = run_femtors(home, &["cron", "list"])?;
     assert!(list.status.success());
     assert!(String::from_utf8_lossy(&list.stdout).contains("job1"));
 
-    let disable = run_picors(home, &["cron", "disable", &id])?;
+    let disable = run_femtors(home, &["cron", "disable", &id])?;
     assert!(disable.status.success());
-    let enable = run_picors(home, &["cron", "enable", &id])?;
+    let enable = run_femtors(home, &["cron", "enable", &id])?;
     assert!(enable.status.success());
 
-    let remove = run_picors(home, &["cron", "remove", &id])?;
+    let remove = run_femtors(home, &["cron", "remove", &id])?;
     assert!(remove.status.success());
     assert!(String::from_utf8_lossy(&remove.stdout).contains("Removed cron job"));
     Ok(())
@@ -241,12 +260,16 @@ fn e2e_cron_lifecycle() -> anyhow::Result<()> {
 #[tokio::test]
 async fn e2e_agent_with_mock_provider() -> anyhow::Result<()> {
     let tmp = tempfile::tempdir()?;
-    let home = tmp.path();
+    let home = tmp.path().to_path_buf();
     let workspace = home.join("ws");
     let (api_base, shutdown) = start_mock_openai_server().await?;
-    write_config(home, &workspace, Some(&api_base), 18790)?;
+    write_config(&home, &workspace, Some(&api_base), 18790)?;
 
-    let out = run_picors(home, &["agent", "-m", "hello", "-s", "cli:e2e"])?;
+    let home_clone = home.clone();
+    let out = tokio::task::spawn_blocking(move || {
+        run_femtors(&home_clone, &["agent", "-m", "hello", "-s", "cli:e2e"])
+    })
+    .await??;
     let _ = shutdown.send(());
     assert!(
         out.status.success(),
@@ -266,9 +289,9 @@ async fn e2e_gateway_health_ready() -> anyhow::Result<()> {
     let port = free_port() as i32;
     write_config(home, &workspace, Some(&api_base), port)?;
 
-    let mut child = Command::new(picors_bin())
+    let mut child = Command::new(femtors_bin())
         .args(["gateway"])
-        .env("PICORS_HOME", home)
+        .env("FEMTORS_HOME", home)
         .env("HOME", home)
         .env("USERPROFILE", home)
         .stdout(Stdio::null())
@@ -308,12 +331,12 @@ fn e2e_migrate_dry_run() -> anyhow::Result<()> {
     let tmp = tempfile::tempdir()?;
     let home = tmp.path();
 
-    let source = home.join(".picors");
+    let source = home.join(".picoclaw");
     std::fs::create_dir_all(source.join("workspace/memory"))?;
     std::fs::write(source.join("workspace/memory/MEMORY.md"), "legacy")?;
     std::fs::write(source.join("config.json"), "{}")?;
 
-    let out = run_picors(home, &["migrate", "--dry-run"])?;
+    let out = run_femtors(home, &["migrate", "--dry-run"])?;
     assert!(
         out.status.success(),
         "{}",
@@ -322,6 +345,7 @@ fn e2e_migrate_dry_run() -> anyhow::Result<()> {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("Migration summary:"));
     assert!(stdout.contains("Config migrated: true"));
-    assert!(!home.join(".picors/config.json").exists());
+    // dry-run must NOT create the target config
+    assert!(!home.join(".femtors/config.json").exists());
     Ok(())
 }

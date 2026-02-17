@@ -81,14 +81,14 @@ function Update-PicoclawConfig {
     ($cfg | ConvertTo-Json -Depth 100) | Set-Content -Path $Path -Encoding utf8
 }
 
-function New-MinPicorsConfig {
+function New-MinFemtoRSConfig {
     param(
         [string]$Path,
         [string]$WorkspaceRoot
     )
     $parent = Split-Path -Path $Path -Parent
     New-Item -ItemType Directory -Path $parent -Force | Out-Null
-    $workspace = Join-Path $WorkspaceRoot "picors-workspace"
+    $workspace = Join-Path $WorkspaceRoot "femtors-workspace"
     New-Item -ItemType Directory -Path $workspace -Force | Out-Null
     $cfg = @{
         gateway = @{
@@ -251,7 +251,7 @@ New-Item -ItemType Directory -Path $nfrRoot -Force | Out-Null
 New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
 New-Item -ItemType Directory -Path $homeDir -Force | Out-Null
 
-$picorsBin = Join-Path $workRoot "target/release/picors.exe"
+$femtorsBin = Join-Path $workRoot "target/release/femtors.exe"
 $picoclawBin = Join-Path $nfrRoot "picoclaw.exe"
 
 if (-not $SkipBuild) {
@@ -287,8 +287,8 @@ if (-not $SkipBuild) {
     }
 }
 
-if (-not (Test-Path -Path $picorsBin)) {
-    throw "picors binary not found: $picorsBin"
+if (-not (Test-Path -Path $femtorsBin)) {
+    throw "femtors binary not found: $femtorsBin"
 }
 if (-not (Test-Path -Path $picoclawBin)) {
     throw "picoclaw baseline binary not found: $picoclawBin"
@@ -297,18 +297,18 @@ if (-not (Test-Path -Path $picoclawBin)) {
 $envPatch = @{
     HOME = $homeDir
     USERPROFILE = $homeDir
-    PICORS_HOME = $homeDir
+    FEMTORS_HOME = $homeDir
     OPENROUTER_API_KEY = "nfr-dummy-key"
     OPENAI_API_KEY = "nfr-dummy-key"
 }
 $previousEnv = Set-TempEnvironment -Values $envPatch
 
 try {
-    Remove-Item -Path (Join-Path $homeDir ".picors") -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path (Join-Path $homeDir ".femtors") -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -Path (Join-Path $homeDir ".picoclaw") -Recurse -Force -ErrorAction SilentlyContinue
 
     New-Item -ItemType Directory -Path (Join-Path $homeDir ".picoclaw") -Force | Out-Null
-    New-MinPicorsConfig -Path (Join-Path $homeDir ".picors/config.json") -WorkspaceRoot $nfrRoot
+    New-MinFemtoRSConfig -Path (Join-Path $homeDir ".femtors/config.json") -WorkspaceRoot $nfrRoot
 
     Write-Host "[setup] onboarding picoclaw"
     & $picoclawBin onboard | Out-Null
@@ -316,7 +316,7 @@ try {
         throw "picoclaw onboard failed"
     }
 
-    Update-GatewayConfig -Path (Join-Path $homeDir ".picors/config.json") -PortValue $Port
+    Update-GatewayConfig -Path (Join-Path $homeDir ".femtors/config.json") -PortValue $Port
     Update-PicoclawConfig -Path (Join-Path $homeDir ".picoclaw/config.json") -PortValue $Port
 
     Write-Host "[measure] picoclaw baseline"
@@ -328,21 +328,21 @@ try {
         -TimeoutSec $ReadyTimeoutSec `
         -RunsCount $Runs
 
-    Write-Host "[measure] picors candidate"
-    $picors = Measure-GatewayStable `
-        -Name "picors" `
-        -ExePath $picorsBin `
-        -LogPath (Join-Path $logsDir "picors.log") `
+    Write-Host "[measure] femtors candidate"
+    $femtors = Measure-GatewayStable `
+        -Name "femtors" `
+        -ExePath $femtorsBin `
+        -LogPath (Join-Path $logsDir "femtors.log") `
         -PortValue $Port `
         -TimeoutSec $ReadyTimeoutSec `
         -RunsCount $Runs
 
-    $rssRatio = [double]$picors.rss_bytes / [double]$picoclaw.rss_bytes
-    $startupRatio = [double]$picors.startup_ms / [double]$picoclaw.startup_ms
+    $rssRatio = [double]$femtors.rss_bytes / [double]$picoclaw.rss_bytes
+    $startupRatio = [double]$femtors.startup_ms / [double]$picoclaw.startup_ms
 
     $result = @{
         picoclaw = $picoclaw
-        picors = $picors
+        femtors = $femtors
         ratio = @{
             rss = [Math]::Round($rssRatio, 4)
             startup = [Math]::Round($startupRatio, 4)
@@ -360,10 +360,10 @@ try {
     Write-Host ""
     Write-Host "NFR Comparison Results"
     Write-Host ("  picoclaw startup_ms: {0}" -f $picoclaw.startup_ms)
-    Write-Host ("  picors   startup_ms: {0}" -f $picors.startup_ms)
+    Write-Host ("  femtors   startup_ms: {0}" -f $femtors.startup_ms)
     Write-Host ("  startup ratio      : {0}" -f ([Math]::Round($startupRatio, 4)))
     Write-Host ("  picoclaw rss_bytes : {0}" -f $picoclaw.rss_bytes)
-    Write-Host ("  picors   rss_bytes : {0}" -f $picors.rss_bytes)
+    Write-Host ("  femtors   rss_bytes : {0}" -f $femtors.rss_bytes)
     Write-Host ("  rss ratio          : {0}" -f ([Math]::Round($rssRatio, 4)))
     Write-Host ("  gate startup<=1.10 : {0}" -f $result.gates.startup_lte_1_10)
     Write-Host ("  gate rss<=1.05     : {0}" -f $result.gates.rss_lte_1_05)

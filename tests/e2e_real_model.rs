@@ -1,12 +1,12 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-fn picors_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_picors"))
+fn femtors_bin() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_femtors"))
 }
 
 fn write_config(home: &Path, workspace: &Path, api_base: &str, model: &str) -> anyhow::Result<()> {
-    let cfg_dir = home.join(".picors");
+    let cfg_dir = home.join(".femtors");
     std::fs::create_dir_all(&cfg_dir)?;
     std::fs::create_dir_all(workspace)?;
 
@@ -42,7 +42,7 @@ fn write_config(home: &Path, workspace: &Path, api_base: &str, model: &str) -> a
 
 #[test]
 fn real_llm_smoke_agent_cli() -> anyhow::Result<()> {
-    if std::env::var("PICORS_REAL_LLM").ok().as_deref() != Some("1") {
+    if std::env::var("FEMTORS_REAL_LLM").ok().as_deref() != Some("1") {
         return Ok(());
     }
 
@@ -55,15 +55,15 @@ fn real_llm_smoke_agent_cli() -> anyhow::Result<()> {
     let workspace = home.join("workspace");
     write_config(home, &workspace, &api_base, &model)?;
 
-    let out = Command::new(picors_bin())
+    let out = Command::new(femtors_bin())
         .args([
             "agent",
             "-m",
-            "Return EXACT token: PICORS_REAL_LLM_SMOKE_OK",
+            "Return EXACT token: FEMTORS_REAL_LLM_SMOKE_OK",
             "-s",
             "cli:real-llm-smoke",
         ])
-        .env("PICORS_HOME", home)
+        .env("FEMTORS_HOME", home)
         .env("HOME", home)
         .env("USERPROFILE", home)
         .output()?;
@@ -75,7 +75,7 @@ fn real_llm_smoke_agent_cli() -> anyhow::Result<()> {
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("PICORS_REAL_LLM_SMOKE_OK"),
+        stdout.contains("FEMTORS_REAL_LLM_SMOKE_OK"),
         "real llm smoke token not found in output:\n{}",
         stdout
     );

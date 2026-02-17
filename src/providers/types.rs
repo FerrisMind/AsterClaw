@@ -95,41 +95,24 @@ pub struct ToolDefinition {
 
 /// Tool function definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum ToolFunctionDefinition {
-    Simple {
-        name: String,
-        description: String,
-        parameters: serde_json::Value,
-    },
-    Full {
-        name: String,
-        description: String,
-        #[serde(default)]
-        parameters: HashMap<String, serde_json::Value>,
-    },
+pub struct ToolFunctionDefinition {
+    pub name: String,
+    pub description: String,
+    #[serde(default)]
+    pub parameters: serde_json::Value,
 }
 
 impl ToolFunctionDefinition {
     pub fn name(&self) -> &str {
-        match self {
-            ToolFunctionDefinition::Simple { name, .. } => name,
-            ToolFunctionDefinition::Full { name, .. } => name,
-        }
+        &self.name
     }
 
     pub fn description(&self) -> &str {
-        match self {
-            ToolFunctionDefinition::Simple { description, .. } => description,
-            ToolFunctionDefinition::Full { description, .. } => description,
-        }
+        &self.description
     }
 
     pub fn parameters(&self) -> serde_json::Value {
-        match self {
-            ToolFunctionDefinition::Simple { parameters, .. } => parameters.clone(),
-            ToolFunctionDefinition::Full { parameters, .. } => serde_json::json!(parameters),
-        }
+        self.parameters.clone()
     }
 }
 
