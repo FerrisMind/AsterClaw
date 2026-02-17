@@ -27,6 +27,7 @@ pub struct AgentLoop {
     context_builder: ContextBuilder,
     running: AtomicBool,
     channel_manager: Arc<RwLock<Option<Arc<ChannelManager>>>>,
+    tool_output_max_chars: usize,
 }
 
 impl AgentLoop {
@@ -34,17 +35,20 @@ impl AgentLoop {
         let workspace = config.workspace_path();
         let sessions = Arc::new(Mutex::new(SessionManager::new(workspace.join("sessions"))));
         let state = Arc::new(Mutex::new(StateManager::new(workspace.clone())));
-        let tool_registry = ToolRegistry::with_web_config(
+        let tool_registry = ToolRegistry::with_tool_config(
             workspace.clone(),
             config.agents.defaults.restrict_to_workspace,
             config.tools.web.clone(),
+            config.tools.exec.clone(),
         );
+        let tool_output_max_chars = config.tools.tool_output_max_chars;
         let subagent_manager = Arc::new(SubagentManager::new(
             provider.clone(),
             config.agents.defaults.model.clone(),
             msg_bus.clone(),
             tool_registry.clone(),
             config.agents.defaults.max_tool_iterations,
+            tool_output_max_chars,
         ));
         tool_registry.set_subagent_manager(subagent_manager);
         let tools = Arc::new(Mutex::new(tool_registry));
@@ -62,6 +66,7 @@ impl AgentLoop {
             context_builder,
             running: AtomicBool::new(false),
             channel_manager: Arc::new(RwLock::new(None)),
+            tool_output_max_chars,
         }
     }
 
@@ -362,6 +367,7 @@ impl AgentLoop {
                 } else {
                     result.for_llm.clone().unwrap_or_default()
                 };
+                let content_for_llm = self.truncate_tool_message(content_for_llm);
 
                 messages.push(Message::tool(&content_for_llm, &tc.id));
 
@@ -392,6 +398,19 @@ impl AgentLoop {
     fn estimate_tokens(&self, messages: &[Message]) -> i32 {
         let total_chars: usize = messages.iter().map(|m| m.content.chars().count()).sum();
         (total_chars as f32 * 0.4) as i32
+    }
+
+    fn truncate_tool_message(&self, content: String) -> String {
+        if self.tool_output_max_chars == 0 {
+            return content;
+        }
+        let total = content.chars().count();
+        if total <= self.tool_output_max_chars {
+            return content;
+        }
+        let kept: String = content.chars().take(self.tool_output_max_chars).collect();
+        let omitted = total - self.tool_output_max_chars;
+        format!("{kept}\n\n[tool output truncated: omitted {omitted} chars]")
     }
 
     async fn handle_command(&self, msg: &InboundMessage) -> anyhow::Result<String> {

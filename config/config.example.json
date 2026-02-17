@@ -43,11 +43,106 @@
   },
   "tools": {
     "web": {
-      "search": {
+      "brave": {
+        "enabled": false,
         "api_key": "YOUR_BRAVE_API_KEY",
         "max_results": 5
-      }
-    }
+      },
+      "duckduckgo": {
+        "enabled": true,
+        "max_results": 5
+      },
+      "fetch_default_max_chars": 120000,
+      "fetch_hard_max_chars": 200000,
+      "fetch_hard_max_bytes": 1000000
+    },
+    "exec": {
+      "confirm_unknown": true,
+      "auto_allow_prefixes": [
+        "ls",
+        "dir",
+        "pwd",
+        "echo",
+        "whoami",
+        "date",
+        "uname",
+        "cat",
+        "type",
+        "head",
+        "tail",
+        "grep",
+        "find",
+        "findstr",
+        "rg",
+        "wc",
+        "tree",
+        "git status",
+        "git log",
+        "git diff",
+        "git show",
+        "git branch",
+        "git rev-parse",
+        "cargo build",
+        "cargo check",
+        "cargo test",
+        "cargo fmt",
+        "cargo clippy",
+        "cargo run",
+        "cargo doc",
+        "cargo metadata",
+        "python",
+        "python3"
+      ],
+      "require_confirm_prefixes": [
+        "git commit",
+        "git push",
+        "npm install",
+        "npm i",
+        "npm add",
+        "npm update",
+        "npm uninstall",
+        "pnpm install",
+        "pnpm add",
+        "pnpm update",
+        "pnpm remove",
+        "yarn install",
+        "yarn add",
+        "yarn up",
+        "yarn remove",
+        "pip install",
+        "pip3 install",
+        "python -m pip install",
+        "python3 -m pip install",
+        "cargo install",
+        "cargo add",
+        "cargo remove",
+        "cp",
+        "mv",
+        "touch",
+        "mkdir",
+        "rmdir",
+        "tee"
+      ],
+      "always_deny_prefixes": [
+        "powershell",
+        "pwsh",
+        "cmd /c",
+        "curl",
+        "wget",
+        "nc",
+        "ncat",
+        "telnet",
+        "ssh",
+        "scp",
+        "sftp",
+        "ftp",
+        "crontab",
+        "schtasks"
+      ],
+      "stdout_max_bytes": 262144,
+      "stderr_max_bytes": 262144
+    },
+    "tool_output_max_chars": 200000
   },
   "heartbeat": {
     "enabled": true,
@@ -58,7 +153,11 @@
     "monitor_usb": true
   },
   "gateway": {
-    "host": "0.0.0.0",
+    "host": "127.0.0.1",
     "port": 18790
+  },
+  "runtime": {
+    "worker_threads": 2,
+    "max_blocking_threads": 16
   }
 }

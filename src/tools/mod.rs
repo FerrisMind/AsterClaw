@@ -58,6 +58,7 @@ pub struct SubagentManager {
     bus: Arc<MessageBus>,
     tools: ToolRegistry,
     max_iterations: i32,
+    tool_output_max_chars: usize,
 }
 
 #[derive(Clone)]
@@ -69,6 +70,7 @@ pub struct ToolLoopConfig<'a> {
     pub options: HashMap<String, Value>,
     pub channel: &'a str,
     pub chat_id: &'a str,
+    pub tool_output_max_chars: usize,
 }
 
 impl SubagentManager {
@@ -78,6 +80,7 @@ impl SubagentManager {
         bus: Arc<MessageBus>,
         tools: ToolRegistry,
         max_iterations: i32,
+        tool_output_max_chars: usize,
     ) -> Self {
         Self {
             tasks: Arc::new(Mutex::new(HashMap::new())),
@@ -87,6 +90,7 @@ impl SubagentManager {
             bus,
             tools,
             max_iterations,
+            tool_output_max_chars,
         }
     }
 
@@ -155,6 +159,7 @@ impl SubagentManager {
                 ]),
                 channel: &origin_channel,
                 chat_id: &origin_chat_id,
+                tool_output_max_chars: self.tool_output_max_chars,
             },
             &mut messages,
         )
@@ -261,6 +266,7 @@ pub async fn run_tool_loop(
                 .error
                 .or(result.for_llm)
                 .unwrap_or_else(|| "tool executed".to_string());
+            let llm_content = truncate_tool_loop_message(llm_content, cfg.tool_output_max_chars);
             messages.push(Message::tool(&llm_content, &tc.id));
         }
     }
@@ -268,6 +274,19 @@ pub async fn run_tool_loop(
         content,
         iterations,
     })
+}
+
+fn truncate_tool_loop_message(content: String, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return content;
+    }
+    let total = content.chars().count();
+    if total <= max_chars {
+        return content;
+    }
+    let kept: String = content.chars().take(max_chars).collect();
+    let omitted = total - max_chars;
+    format!("{kept}\n\n[tool output truncated: omitted {omitted} chars]")
 }
 
 impl ToolResult {
@@ -288,11 +307,6 @@ impl ToolResult {
             error: Some(msg.to_string()),
         }
     }
-
-    pub fn with_for_llm(mut self, msg: &str) -> Self {
-        self.for_llm = Some(msg.to_string());
-        self
-    }
 }
 
 #[async_trait]
@@ -311,7 +325,7 @@ pub trait Tool: Send + Sync {
     ) -> ToolResult;
 }
 
-use crate::config::WebToolsConfig;
+use crate::config::{ExecToolsConfig, WebToolsConfig};
 
 #[derive(Clone)]
 pub struct ToolRegistry {
@@ -320,31 +334,59 @@ pub struct ToolRegistry {
     tools: HashMap<String, Arc<dyn Tool>>,
     subagent_manager: Arc<RwLock<Option<Arc<SubagentManager>>>>,
     web_config: WebToolsConfig,
+    exec_config: ExecToolsConfig,
     cron_service: Arc<parking_lot::Mutex<crate::cron::CronService>>,
 }
 
 impl ToolRegistry {
     #[allow(dead_code)] // Used by tests
     pub fn new(workspace: PathBuf, restrict_to_workspace: bool) -> Self {
-        Self::with_web_config(workspace, restrict_to_workspace, WebToolsConfig::default())
+        Self::with_tool_config(
+            workspace,
+            restrict_to_workspace,
+            WebToolsConfig::default(),
+            ExecToolsConfig::default(),
+        )
     }
 
+    #[allow(dead_code)] // Backward-compatible constructor.
     pub fn with_web_config(
         workspace: PathBuf,
         restrict_to_workspace: bool,
         web_config: WebToolsConfig,
     ) -> Self {
+        Self::with_tool_config(
+            workspace,
+            restrict_to_workspace,
+            web_config,
+            ExecToolsConfig::default(),
+        )
+    }
+
+    pub fn with_tool_config(
+        workspace: PathBuf,
+        restrict_to_workspace: bool,
+        web_config: WebToolsConfig,
+        exec_config: ExecToolsConfig,
+    ) -> Self {
         let cron_path = workspace.join("cron").join("jobs.json");
         let cron_service = Arc::new(parking_lot::Mutex::new(crate::cron::CronService::new(
             &cron_path, None,
         )));
-        Self::with_cron_service(workspace, restrict_to_workspace, web_config, cron_service)
+        Self::with_cron_service(
+            workspace,
+            restrict_to_workspace,
+            web_config,
+            exec_config,
+            cron_service,
+        )
     }
 
     pub fn with_cron_service(
         workspace: PathBuf,
         restrict_to_workspace: bool,
         web_config: WebToolsConfig,
+        exec_config: ExecToolsConfig,
         cron_service: Arc<parking_lot::Mutex<crate::cron::CronService>>,
     ) -> Self {
         let mut registry = Self {
@@ -353,6 +395,7 @@ impl ToolRegistry {
             tools: HashMap::new(),
             subagent_manager: Arc::new(RwLock::new(None)),
             web_config,
+            exec_config,
             cron_service,
         };
         registry.register_builtin_tools();
@@ -384,9 +427,28 @@ impl ToolRegistry {
             self.workspace.clone(),
             self.restrict_to_workspace,
         ));
-        self.register(ExecTool::new(self.workspace.clone()));
-        self.register(WebSearchTool::from_config(&self.web_config));
-        self.register(WebFetchTool::new(50_000));
+        self.register(ExecTool::new(
+            self.workspace.clone(),
+            self.exec_config.clone(),
+        ));
+        // Shared HTTP client — avoids duplicating TLS/connection pool per tool (~5-7 MB each).
+        let shared_http = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .pool_max_idle_per_host(4)
+            .redirect(reqwest::redirect::Policy::limited(5))
+            .build()
+            .unwrap_or_default();
+        self.register(WebSearchTool::from_config(
+            &self.web_config,
+            shared_http.clone(),
+        ));
+        self.register(WebFetchTool::with_limits(
+            self.web_config.fetch_default_max_chars,
+            self.web_config.fetch_hard_max_chars,
+            self.web_config.fetch_hard_max_bytes,
+            shared_http,
+        ));
         self.register(MessageTool::new());
         self.register(SpawnTool::new(self.subagent_manager.clone()));
         self.register(SubagentTool::new(self.subagent_manager.clone()));
@@ -578,7 +640,7 @@ mod tests {
 
     #[tokio::test]
     async fn web_fetch_rejects_invalid_scheme() {
-        let tool = WebFetchTool::new(200);
+        let tool = WebFetchTool::new(200, reqwest::Client::new());
         let mut args = HashMap::new();
         args.insert(
             "url".to_string(),
@@ -802,6 +864,7 @@ mod tests {
             bus,
             registry.clone(),
             3,
+            20_000,
         ));
         registry.set_subagent_manager(manager);
         let tool = registry.get("subagent").expect("subagent tool");
@@ -831,6 +894,7 @@ mod tests {
             bus.clone(),
             registry.clone(),
             3,
+            20_000,
         ));
         registry.set_subagent_manager(manager);
         let tool = registry.get("spawn").expect("spawn tool");
@@ -1155,6 +1219,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn exec_truncates_large_stdout() {
+        let tmp = TempDir::new().expect("tmp");
+        let registry = ToolRegistry::new(tmp.path().to_path_buf(), true);
+        let tool = registry.get("exec").expect("tool");
+
+        let mut args = HashMap::new();
+        let cmd = if cfg!(target_os = "windows") {
+            "for /L %i in (1,1,100000) do @echo 1234567890"
+        } else {
+            "yes 1234567890 | head -n 100000"
+        };
+        args.insert("command".to_string(), Value::String(cmd.to_string()));
+        args.insert("confirm".to_string(), Value::Bool(true));
+        let result = tool.execute(args, "", "").await;
+        assert!(result.error.is_none(), "{:?}", result.error);
+        let text = result.for_llm.unwrap_or_default();
+        assert!(
+            text.contains("[stdout truncated]"),
+            "missing truncation marker"
+        );
+        assert!(
+            text.len() <= 300_000,
+            "stdout should be bounded, got {} bytes",
+            text.len()
+        );
+    }
+
+    #[tokio::test]
     async fn exec_deny_list_case_insensitive() {
         let tmp = TempDir::new().expect("tmp");
         let registry = ToolRegistry::new(tmp.path().to_path_buf(), true);
@@ -1167,11 +1259,33 @@ mod tests {
         assert!(result.error.is_some(), "uppercase rm -rf should be blocked");
     }
 
+    #[tokio::test]
+    async fn exec_requires_confirm_for_state_changing_command() {
+        let tmp = TempDir::new().expect("tmp");
+        let registry = ToolRegistry::new(tmp.path().to_path_buf(), true);
+        let tool = registry.get("exec").expect("tool");
+
+        let mut args = HashMap::new();
+        args.insert(
+            "command".to_string(),
+            Value::String("git commit -m \"x\"".to_string()),
+        );
+        let result = tool.execute(args, "", "").await;
+        assert!(result.error.is_some());
+        assert!(
+            result
+                .error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("confirm=true")
+        );
+    }
+
     // ── web_fetch: missing url + parse error ────────────────────────
 
     #[tokio::test]
     async fn web_fetch_missing_url_returns_error() {
-        let tool = WebFetchTool::new(200);
+        let tool = WebFetchTool::new(200, reqwest::Client::new());
         let result = tool.execute(HashMap::new(), "", "").await;
         assert!(result.error.is_some());
         assert!(result.error.unwrap().contains("url"));
@@ -1179,7 +1293,7 @@ mod tests {
 
     #[tokio::test]
     async fn web_fetch_invalid_url_returns_error() {
-        let tool = WebFetchTool::new(200);
+        let tool = WebFetchTool::new(200, reqwest::Client::new());
         let mut args = HashMap::new();
         args.insert(
             "url".to_string(),
@@ -1187,6 +1301,19 @@ mod tests {
         );
         let result = tool.execute(args, "", "").await;
         assert!(result.error.is_some());
+    }
+
+    #[tokio::test]
+    async fn web_fetch_blocks_localhost_urls() {
+        let tool = WebFetchTool::new(200, reqwest::Client::new());
+        let mut args = HashMap::new();
+        args.insert(
+            "url".to_string(),
+            Value::String("http://localhost:8080/health".to_string()),
+        );
+        let result = tool.execute(args, "", "").await;
+        assert!(result.error.is_some());
+        assert!(result.error.as_deref().unwrap_or_default().contains("SSRF"));
     }
 
     // ── message: missing content + cross-channel + empty channel ────
@@ -1376,7 +1503,7 @@ mod tests {
     #[ignore] // requires network
     async fn web_search_ddg_returns_results() {
         // Force DDG provider (no Brave key)
-        let tool = WebSearchTool::from_config(&WebToolsConfig::default());
+        let tool = WebSearchTool::from_config(&WebToolsConfig::default(), reqwest::Client::new());
         let mut args = HashMap::new();
         args.insert(
             "query".to_string(),
@@ -1411,7 +1538,7 @@ mod tests {
     #[tokio::test]
     #[ignore] // requires network
     async fn web_search_ddg_respects_count_limit() {
-        let tool = WebSearchTool::from_config(&WebToolsConfig::default());
+        let tool = WebSearchTool::from_config(&WebToolsConfig::default(), reqwest::Client::new());
         let mut args = HashMap::new();
         args.insert("query".to_string(), Value::String("wikipedia".to_string()));
         args.insert("count".to_string(), Value::Number(2.into()));
@@ -1431,7 +1558,7 @@ mod tests {
     #[tokio::test]
     #[ignore] // requires network
     async fn web_search_ddg_decodes_redirect_urls() {
-        let tool = WebSearchTool::from_config(&WebToolsConfig::default());
+        let tool = WebSearchTool::from_config(&WebToolsConfig::default(), reqwest::Client::new());
         let mut args = HashMap::new();
         args.insert("query".to_string(), Value::String("GitHub".to_string()));
         args.insert("count".to_string(), Value::Number(3.into()));
@@ -1535,12 +1662,12 @@ mod tests {
 
         // Empty daily
         let mut rd = HashMap::new();
-        rd.insert("action".to_string(), Value::String("read_daily".to_string()));
-        let empty = tool.execute(rd, "", "").await;
-        assert_eq!(
-            empty.for_llm.as_deref(),
-            Some("(no daily notes for today)")
+        rd.insert(
+            "action".to_string(),
+            Value::String("read_daily".to_string()),
         );
+        let empty = tool.execute(rd, "", "").await;
+        assert_eq!(empty.for_llm.as_deref(), Some("(no daily notes for today)"));
 
         // Append daily
         let mut ap = HashMap::new();
@@ -1557,7 +1684,10 @@ mod tests {
 
         // Read back
         let mut rd2 = HashMap::new();
-        rd2.insert("action".to_string(), Value::String("read_daily".to_string()));
+        rd2.insert(
+            "action".to_string(),
+            Value::String("read_daily".to_string()),
+        );
         let result = tool.execute(rd2, "", "").await;
         assert!(
             result.for_llm.unwrap_or_default().contains("Met with team"),

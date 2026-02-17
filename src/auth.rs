@@ -88,7 +88,17 @@ fn save_store(store: &CredentialStore) -> Result<()> {
         std::fs::create_dir_all(parent)?;
     }
     let content = serde_json::to_string_pretty(store)?;
-    std::fs::write(path, content)?;
+    // Atomic write: write to temp file, then rename.
+    let dir = path.parent().unwrap_or(std::path::Path::new("."));
+    let temp = tempfile::NamedTempFile::new_in(dir)?;
+    std::fs::write(temp.path(), &content)?;
+    // Restrict permissions BEFORE persisting so no window of 0644 exposure.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(temp.path(), std::fs::Permissions::from_mode(0o600))?;
+    }
+    temp.persist(&path)?;
     Ok(())
 }
 

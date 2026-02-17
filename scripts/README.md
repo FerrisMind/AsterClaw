@@ -2,12 +2,12 @@
 
 ## NFR Harness
 
-`nfr-harness.ps1` compares `femtors` against a Go `picoclaw` baseline binary.
+`nfr-harness.ps1` compares `AsterClaw` against a Go baseline binary.
 
 What it does:
 
-1. Builds `femtors` (`cargo build --release`).
-2. Builds `picoclaw` from `references/picoclaw` (`go build ./cmd/picoclaw`).
+1. Builds `AsterClaw` (`cargo build --release`).
+2. Builds the Go baseline from `references/picoclaw` (`go build`).
 3. Uses a temporary HOME (`target/nfr/home`) for isolated onboarding/config.
 4. Starts each gateway, waits for `/ready`, records:
    - `startup_ms` (`startup_to_ready`)
@@ -26,7 +26,7 @@ pwsh scripts/nfr-harness.ps1
 Notes:
 
 - Requires `go` and `cargo` in `PATH`.
-- Use `-SkipBuild` only if `target/release/femtors.exe` and `target/nfr/picoclaw.exe` already exist.
+- Use `-SkipBuild` only if `target/release/asterclaw.exe` and the Go baseline binary already exist.
 
 ## Optional: PGO Build (Manual)
 
@@ -53,3 +53,18 @@ cargo build --release
 ```powershell
 Remove-Item Env:RUSTFLAGS
 ```
+
+## Simply Tool-Memory Profiling
+
+`simply-profile.ps1` measures peak process memory while running a tool-heavy test (`exec_truncates_large_stdout`), useful for tracking memory spike regressions.
+
+Usage:
+
+```powershell
+pwsh scripts/simply-profile.ps1
+```
+
+Output:
+
+- `target/simply-profile/results.json`
+- per-run logs in `target/simply-profile/logs/`

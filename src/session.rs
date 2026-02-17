@@ -18,6 +18,7 @@ pub struct SessionManager {
 struct Session {
     messages: Vec<ProviderMessage>,
     summary: String,
+    dirty: bool,
 }
 
 impl SessionManager {
@@ -35,6 +36,7 @@ impl SessionManager {
             let session = self.try_load_from_disk(key).unwrap_or(Session {
                 messages: Vec::new(),
                 summary: String::new(),
+                dirty: false,
             });
             self.sessions.insert(key.to_string(), session);
         }
@@ -49,6 +51,7 @@ impl SessionManager {
         Some(Session {
             messages,
             summary: String::new(),
+            dirty: false,
         })
     }
 
@@ -60,7 +63,7 @@ impl SessionManager {
         }
     }
 
-    /// Add a message to a session (auto-saves to disk).
+    /// Add a message to a session.
     pub fn add_message(&mut self, key: &str, role: &str, content: &str) {
         let session = self.get_or_create(key);
         session.messages.push(ProviderMessage {
@@ -70,15 +73,15 @@ impl SessionManager {
             tool_call_id: None,
         });
         Self::trim_history(&mut session.messages);
-        let _ = self.save(key);
+        session.dirty = true;
     }
 
-    /// Add a full message (with tool calls, auto-saves to disk).
+    /// Add a full message (with tool calls).
     pub fn add_full_message(&mut self, key: &str, msg: ProviderMessage) {
         let session = self.get_or_create(key);
         session.messages.push(msg);
         Self::trim_history(&mut session.messages);
-        let _ = self.save(key);
+        session.dirty = true;
     }
 
     /// Get session history
@@ -94,24 +97,28 @@ impl SessionManager {
     }
 
     /// Save session to disk
-    pub fn save(&self, key: &str) -> anyhow::Result<()> {
-        if let Some(session) = self.sessions.get(key) {
-            // Only save if there are messages
-            if session.messages.is_empty() {
+    pub fn save(&mut self, key: &str) -> anyhow::Result<()> {
+        let path = self.session_file_path(key);
+        if let Some(session) = self.sessions.get_mut(key) {
+            if !session.dirty {
                 return Ok(());
             }
-
-            let path = self.session_file_path(key);
+            // Only save if there are messages
+            if session.messages.is_empty() {
+                session.dirty = false;
+                return Ok(());
+            }
 
             // Create directory if needed
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
 
-            let data = serde_json::to_string_pretty(&session.messages)?;
+            let data = serde_json::to_vec(&session.messages)?;
             let temp = tempfile::NamedTempFile::new_in(&self.sessions_dir)?;
             std::fs::write(temp.path(), data)?;
             temp.persist(path)?;
+            session.dirty = false;
         }
         Ok(())
     }

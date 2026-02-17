@@ -1,6 +1,7 @@
 //! Web search and fetch tools.
 
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::sync::LazyLock;
 
 use async_trait::async_trait;
@@ -11,6 +12,8 @@ use url::Url;
 use crate::config::WebToolsConfig;
 
 use super::{Tool, ToolResult, arg_i64, arg_string};
+
+const DDG_HTML_MAX_BYTES: usize = 512 * 1024;
 
 // ── WebSearchTool ───────────────────────────────────────────────────────
 
@@ -30,7 +33,7 @@ pub struct WebSearchTool {
 
 impl WebSearchTool {
     /// Build from config — priority: Brave > DuckDuckGo > disabled.
-    pub fn from_config(web: &WebToolsConfig) -> Self {
+    pub fn from_config(web: &WebToolsConfig, client: reqwest::Client) -> Self {
         let brave_key = web
             .brave
             .api_key
@@ -52,10 +55,7 @@ impl WebSearchTool {
             SearchProvider::DuckDuckGo { max_results: 5 }
         };
 
-        Self {
-            provider,
-            client: reqwest::Client::new(),
-        }
+        Self { provider, client }
     }
 
     /// Brave Search API call.
@@ -125,10 +125,7 @@ impl WebSearchTool {
             .await
             .map_err(|e| format!("DDG request failed: {e}"))?;
 
-        let html = resp
-            .text()
-            .await
-            .map_err(|e| format!("DDG response read failed: {e}"))?;
+        let (html, ddg_truncated) = read_response_limited(resp, DDG_HTML_MAX_BYTES).await?;
 
         // Two-step approach: find ALL <a> tags, then filter for result__a.
         // This avoids depending on attribute ordering (class before/after href).
@@ -208,6 +205,9 @@ impl WebSearchTool {
         if seen == 0 {
             lines.push("No results".to_string());
         }
+        if ddg_truncated {
+            lines.push("(results parsed from truncated DDG page body)".to_string());
+        }
         Ok(lines.join("\n"))
     }
 }
@@ -256,7 +256,7 @@ impl Tool for WebSearchTool {
         };
 
         match result {
-            Ok(out) => ToolResult::new(&out).with_for_llm(&out),
+            Ok(out) => ToolResult::new(&out),
             Err(e) => ToolResult::error(&format!("search failed: {}", e)),
         }
     }
@@ -265,17 +265,57 @@ impl Tool for WebSearchTool {
 // ── WebFetchTool ────────────────────────────────────────────────────────
 
 pub struct WebFetchTool {
-    max_chars: usize,
+    default_max_chars: usize,
+    hard_max_chars: usize,
+    hard_max_bytes: usize,
     client: reqwest::Client,
 }
 
 impl WebFetchTool {
-    pub fn new(max_chars: usize) -> Self {
+    #[allow(dead_code)] // test helper constructor
+    pub fn new(max_chars: usize, client: reqwest::Client) -> Self {
+        Self::with_limits(max_chars, 200_000, 1_000_000, client)
+    }
+
+    pub fn with_limits(
+        default_max_chars: usize,
+        hard_max_chars: usize,
+        hard_max_bytes: usize,
+        client: reqwest::Client,
+    ) -> Self {
         Self {
-            max_chars: max_chars.max(100),
-            client: reqwest::Client::new(),
+            default_max_chars: default_max_chars.max(100),
+            hard_max_chars: hard_max_chars.max(100),
+            hard_max_bytes: hard_max_bytes.max(4096),
+            client,
         }
     }
+}
+
+async fn read_response_limited(
+    mut resp: reqwest::Response,
+    max_bytes: usize,
+) -> Result<(String, bool), String> {
+    let mut bytes = Vec::with_capacity(max_bytes.min(16 * 1024));
+    let mut truncated = false;
+    while let Some(chunk) = resp
+        .chunk()
+        .await
+        .map_err(|e| format!("failed to read response: {}", e))?
+    {
+        let remaining = max_bytes.saturating_sub(bytes.len());
+        if remaining == 0 {
+            truncated = true;
+            break;
+        }
+        let take = remaining.min(chunk.len());
+        bytes.extend_from_slice(&chunk[..take]);
+        if take < chunk.len() {
+            truncated = true;
+            break;
+        }
+    }
+    Ok((String::from_utf8_lossy(&bytes).to_string(), truncated))
 }
 
 fn html_to_text(input: &str) -> String {
@@ -295,6 +335,56 @@ fn html_to_text(input: &str) -> String {
     let s = re_style.replace_all(&s, "");
     let s = re_tags.replace_all(&s, " ");
     re_ws.replace_all(&s, " ").trim().to_string()
+}
+
+fn is_private_or_local_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            let oct = v4.octets();
+            v4.is_private()
+                || v4.is_loopback()
+                || v4.is_link_local()
+                || v4.is_broadcast()
+                || v4.is_unspecified()
+                // Carrier-grade NAT: 100.64.0.0/10
+                || (oct[0] == 100 && (64..=127).contains(&oct[1]))
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_unique_local()
+                || v6.is_unicast_link_local()
+        }
+    }
+}
+
+async fn is_blocked_web_target(url: &Url) -> bool {
+    let Some(host) = url.host_str() else {
+        return true;
+    };
+
+    let host_lc = host.to_ascii_lowercase();
+    if host_lc == "localhost"
+        || host_lc.ends_with(".localhost")
+        || host_lc == "metadata.google.internal"
+    {
+        return true;
+    }
+
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return is_private_or_local_ip(ip);
+    }
+
+    let port = url.port_or_known_default().unwrap_or(80);
+    if let Ok(addrs) = tokio::net::lookup_host((host, port)).await {
+        for addr in addrs {
+            if is_private_or_local_ip(addr.ip()) {
+                return true;
+            }
+        }
+    }
+
+    false
 }
 
 #[async_trait]
@@ -328,9 +418,13 @@ impl Tool for WebFetchTool {
         if parsed.scheme() != "http" && parsed.scheme() != "https" {
             return ToolResult::error("only http/https URLs are allowed");
         }
+        if is_blocked_web_target(&parsed).await {
+            return ToolResult::error("target URL is blocked by SSRF guard");
+        }
         let limit = arg_i64(&args, "max_chars")
             .map(|v| v.max(100) as usize)
-            .unwrap_or(self.max_chars);
+            .unwrap_or(self.default_max_chars)
+            .min(self.hard_max_chars);
 
         let resp = match self
             .client
@@ -351,11 +445,20 @@ impl Tool for WebFetchTool {
             .unwrap_or("")
             .to_string();
 
-        let raw = match resp.text().await {
+        let raw_byte_limit = (limit.saturating_mul(4))
+            .saturating_add(8192)
+            .min(self.hard_max_bytes)
+            .max(4096);
+        let (raw, raw_truncated) = match read_response_limited(resp, raw_byte_limit).await {
             Ok(v) => v,
-            Err(e) => return ToolResult::error(&format!("failed to read response: {}", e)),
+            Err(e) => return ToolResult::error(&e),
         };
 
+        let raw_prefix = raw
+            .chars()
+            .take(1024)
+            .collect::<String>()
+            .to_ascii_lowercase();
         let mut text = if content_type.contains("application/json") {
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&raw) {
                 serde_json::to_string_pretty(&json).unwrap_or(raw)
@@ -364,31 +467,35 @@ impl Tool for WebFetchTool {
             }
         } else if content_type.contains("text/html")
             || raw.starts_with("<!DOCTYPE")
-            || raw.to_ascii_lowercase().starts_with("<html")
+            || raw_prefix.starts_with("<html")
         {
             html_to_text(&raw)
         } else {
             raw
         };
 
-        let truncated = text.chars().count() > limit;
-        if truncated {
+        let mut truncated = raw_truncated;
+        if text.chars().count() > limit {
             text = text.chars().take(limit).collect();
+            truncated = true;
         }
 
-        let payload = serde_json::json!({
-            "url": input_url,
-            "status": status,
-            "content_type": content_type,
-            "truncated": truncated,
-            "length": text.chars().count(),
-            "text": text,
-        });
+        let text_len = text.chars().count();
         let for_llm = format!(
             "Fetched URL (status={}, truncated={}, chars={})\n\n{}",
-            status, truncated, payload["length"], text
+            status, truncated, text_len, text
         );
 
-        ToolResult::new(&for_llm).with_for_llm(&for_llm)
+        tracing::debug!(
+            "web_fetch: status={}, content_type={}, limit_chars={}, raw_byte_limit={}, raw_truncated={}, final_chars={}",
+            status,
+            content_type,
+            limit,
+            raw_byte_limit,
+            raw_truncated,
+            text_len
+        );
+
+        ToolResult::new(&for_llm)
     }
 }

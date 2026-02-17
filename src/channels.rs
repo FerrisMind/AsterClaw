@@ -93,8 +93,19 @@ impl TelegramChannel {
                 "telegram token is required when channel is enabled"
             ));
         }
+        let allow_list: Vec<String> = telegram
+            .allow_from
+            .iter()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+            .collect();
+        if allow_list.is_empty() {
+            return Err(anyhow!(
+                "telegram allow_from is required for private mode (add your user id/username)"
+            ));
+        }
         Ok(Self {
-            base: BaseChannel::new(telegram.allow_from.clone()),
+            base: BaseChannel::new(allow_list),
             token: telegram.token.clone(),
             bus,
             client: Client::new(),
@@ -683,6 +694,8 @@ impl ChannelManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{bus::MessageBus, config::Config};
+    use std::sync::Arc;
 
     #[test]
     fn base_channel_allowlist_matching() {
@@ -691,6 +704,20 @@ mod tests {
         assert!(is_allowed_sender(&["@alice".to_string()], "123456|alice"));
         assert!(is_allowed_sender(&["123456|alice".to_string()], "123456"));
         assert!(!is_allowed_sender(&["123456".to_string()], "654321|bob"));
+    }
+
+    #[test]
+    fn telegram_channel_requires_non_empty_allowlist() {
+        let mut cfg = Config::default();
+        cfg.channels.telegram.enabled = true;
+        cfg.channels.telegram.token = "test-token".to_string();
+        cfg.channels.telegram.allow_from.clear();
+
+        let bus = Arc::new(MessageBus::new());
+        let err = TelegramChannel::new(&cfg, bus)
+            .err()
+            .expect("expected error");
+        assert!(err.to_string().contains("allow_from"));
     }
 
     #[test]

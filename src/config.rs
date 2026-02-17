@@ -17,6 +17,8 @@ pub struct Config {
     #[serde(default)]
     pub gateway: GatewayConfig,
     #[serde(default)]
+    pub runtime: RuntimeConfig,
+    #[serde(default)]
     pub tools: ToolsConfig,
     #[serde(default)]
     pub heartbeat: HeartbeatConfig,
@@ -152,33 +154,91 @@ pub struct GatewayConfig {
 impl Default for GatewayConfig {
     fn default() -> Self {
         Self {
-            host: "0.0.0.0".to_string(),
+            host: "127.0.0.1".to_string(),
             port: 18790,
         }
     }
 }
 
 fn default_gateway_host() -> String {
-    "0.0.0.0".to_string()
+    "127.0.0.1".to_string()
 }
 
 fn default_gateway_port() -> i32 {
     18790
 }
 
+/// Runtime configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeConfig {
+    #[serde(default = "default_runtime_worker_threads")]
+    pub worker_threads: usize,
+    #[serde(default = "default_runtime_max_blocking_threads")]
+    pub max_blocking_threads: usize,
+}
+
+impl Default for RuntimeConfig {
+    fn default() -> Self {
+        Self {
+            worker_threads: default_runtime_worker_threads(),
+            max_blocking_threads: default_runtime_max_blocking_threads(),
+        }
+    }
+}
+
+fn default_runtime_worker_threads() -> usize {
+    2
+}
+
+fn default_runtime_max_blocking_threads() -> usize {
+    16
+}
+
 /// Tools configuration
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolsConfig {
     #[serde(default)]
     pub web: WebToolsConfig,
+    #[serde(default)]
+    pub exec: ExecToolsConfig,
+    #[serde(default = "default_tool_output_max_chars")]
+    pub tool_output_max_chars: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+impl Default for ToolsConfig {
+    fn default() -> Self {
+        Self {
+            web: WebToolsConfig::default(),
+            exec: ExecToolsConfig::default(),
+            tool_output_max_chars: default_tool_output_max_chars(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebToolsConfig {
     #[serde(default)]
     pub brave: BraveConfig,
     #[serde(default)]
     pub duckduckgo: DuckDuckGoConfig,
+    #[serde(default = "default_web_fetch_default_max_chars")]
+    pub fetch_default_max_chars: usize,
+    #[serde(default = "default_web_fetch_hard_max_chars")]
+    pub fetch_hard_max_chars: usize,
+    #[serde(default = "default_web_fetch_hard_max_bytes")]
+    pub fetch_hard_max_bytes: usize,
+}
+
+impl Default for WebToolsConfig {
+    fn default() -> Self {
+        Self {
+            brave: BraveConfig::default(),
+            duckduckgo: DuckDuckGoConfig::default(),
+            fetch_default_max_chars: default_web_fetch_default_max_chars(),
+            fetch_hard_max_chars: default_web_fetch_hard_max_chars(),
+            fetch_hard_max_bytes: default_web_fetch_hard_max_bytes(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -216,6 +276,158 @@ impl Default for DuckDuckGoConfig {
             max_results: 5,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecToolsConfig {
+    #[serde(default = "default_true")]
+    pub confirm_unknown: bool,
+    #[serde(default = "default_exec_auto_allow_prefixes")]
+    pub auto_allow_prefixes: Vec<String>,
+    #[serde(default = "default_exec_require_confirm_prefixes")]
+    pub require_confirm_prefixes: Vec<String>,
+    #[serde(default = "default_exec_always_deny_prefixes")]
+    pub always_deny_prefixes: Vec<String>,
+    #[serde(default = "default_exec_stdout_max_bytes")]
+    pub stdout_max_bytes: usize,
+    #[serde(default = "default_exec_stderr_max_bytes")]
+    pub stderr_max_bytes: usize,
+}
+
+impl Default for ExecToolsConfig {
+    fn default() -> Self {
+        Self {
+            confirm_unknown: true,
+            auto_allow_prefixes: default_exec_auto_allow_prefixes(),
+            require_confirm_prefixes: default_exec_require_confirm_prefixes(),
+            always_deny_prefixes: default_exec_always_deny_prefixes(),
+            stdout_max_bytes: default_exec_stdout_max_bytes(),
+            stderr_max_bytes: default_exec_stderr_max_bytes(),
+        }
+    }
+}
+
+fn default_exec_auto_allow_prefixes() -> Vec<String> {
+    [
+        "ls",
+        "dir",
+        "pwd",
+        "echo",
+        "whoami",
+        "date",
+        "uname",
+        "cat",
+        "type",
+        "head",
+        "tail",
+        "grep",
+        "find",
+        "findstr",
+        "rg",
+        "wc",
+        "tree",
+        "git status",
+        "git log",
+        "git diff",
+        "git show",
+        "git branch",
+        "git rev-parse",
+        "cargo build",
+        "cargo check",
+        "cargo test",
+        "cargo fmt",
+        "cargo clippy",
+        "cargo run",
+        "cargo doc",
+        "cargo metadata",
+        "python",
+        "python3",
+    ]
+    .into_iter()
+    .map(|s| s.to_string())
+    .collect()
+}
+
+fn default_exec_require_confirm_prefixes() -> Vec<String> {
+    [
+        "git commit",
+        "git push",
+        "npm install",
+        "npm i",
+        "npm add",
+        "npm update",
+        "npm uninstall",
+        "pnpm install",
+        "pnpm add",
+        "pnpm update",
+        "pnpm remove",
+        "yarn install",
+        "yarn add",
+        "yarn up",
+        "yarn remove",
+        "pip install",
+        "pip3 install",
+        "python -m pip install",
+        "python3 -m pip install",
+        "cargo install",
+        "cargo add",
+        "cargo remove",
+        "cp",
+        "mv",
+        "touch",
+        "mkdir",
+        "rmdir",
+        "tee",
+    ]
+    .into_iter()
+    .map(|s| s.to_string())
+    .collect()
+}
+
+fn default_exec_always_deny_prefixes() -> Vec<String> {
+    [
+        "powershell",
+        "pwsh",
+        "cmd /c",
+        "curl",
+        "wget",
+        "nc",
+        "ncat",
+        "telnet",
+        "ssh",
+        "scp",
+        "sftp",
+        "ftp",
+        "crontab",
+        "schtasks",
+    ]
+    .into_iter()
+    .map(|s| s.to_string())
+    .collect()
+}
+
+fn default_exec_stdout_max_bytes() -> usize {
+    256 * 1024
+}
+
+fn default_exec_stderr_max_bytes() -> usize {
+    256 * 1024
+}
+
+fn default_tool_output_max_chars() -> usize {
+    200_000
+}
+
+fn default_web_fetch_default_max_chars() -> usize {
+    120_000
+}
+
+fn default_web_fetch_hard_max_chars() -> usize {
+    200_000
+}
+
+fn default_web_fetch_hard_max_bytes() -> usize {
+    1_000_000
 }
 
 fn default_max_results() -> i32 {
@@ -314,7 +526,15 @@ pub fn save_config(path: &Path, config: &Config) -> anyhow::Result<()> {
     std::fs::create_dir_all(dir)?;
 
     let data = serde_json::to_string_pretty(config)?;
-    std::fs::write(path, data)?;
+    // Atomic write via temp file — config may contain API keys.
+    let temp = tempfile::NamedTempFile::new_in(dir)?;
+    std::fs::write(temp.path(), &data)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(temp.path(), std::fs::Permissions::from_mode(0o600))?;
+    }
+    temp.persist(path)?;
     Ok(())
 }
 
@@ -423,5 +643,63 @@ mod tests {
             parsed_femtors.agents.defaults.workspace,
             "~/.asterclaw/workspace"
         );
+    }
+
+    #[test]
+    fn loads_exec_tool_policy_from_config() {
+        let raw = r#"{
+            "tools": {
+                "exec": {
+                    "confirmUnknown": false,
+                    "autoAllowPrefixes": ["echo", "ls"],
+                    "requireConfirmPrefixes": ["git commit"],
+                    "alwaysDenyPrefixes": ["curl"],
+                    "stdoutMaxBytes": 12345,
+                    "stderrMaxBytes": 23456
+                }
+            }
+        }"#;
+        let parsed = parse_compat_json(raw).expect("parse");
+        assert!(!parsed.tools.exec.confirm_unknown);
+        assert_eq!(parsed.tools.exec.auto_allow_prefixes, vec!["echo", "ls"]);
+        assert_eq!(
+            parsed.tools.exec.require_confirm_prefixes,
+            vec!["git commit"]
+        );
+        assert_eq!(parsed.tools.exec.always_deny_prefixes, vec!["curl"]);
+        assert_eq!(parsed.tools.exec.stdout_max_bytes, 12345);
+        assert_eq!(parsed.tools.exec.stderr_max_bytes, 23456);
+    }
+
+    #[test]
+    fn loads_tool_limits_from_config() {
+        let raw = r#"{
+            "tools": {
+                "toolOutputMaxChars": 7777,
+                "web": {
+                    "fetchDefaultMaxChars": 11111,
+                    "fetchHardMaxChars": 22222,
+                    "fetchHardMaxBytes": 33333
+                }
+            }
+        }"#;
+        let parsed = parse_compat_json(raw).expect("parse");
+        assert_eq!(parsed.tools.tool_output_max_chars, 7777);
+        assert_eq!(parsed.tools.web.fetch_default_max_chars, 11111);
+        assert_eq!(parsed.tools.web.fetch_hard_max_chars, 22222);
+        assert_eq!(parsed.tools.web.fetch_hard_max_bytes, 33333);
+    }
+
+    #[test]
+    fn loads_runtime_config_from_config() {
+        let raw = r#"{
+            "runtime": {
+                "workerThreads": 3,
+                "maxBlockingThreads": 12
+            }
+        }"#;
+        let parsed = parse_compat_json(raw).expect("parse");
+        assert_eq!(parsed.runtime.worker_threads, 3);
+        assert_eq!(parsed.runtime.max_blocking_threads, 12);
     }
 }

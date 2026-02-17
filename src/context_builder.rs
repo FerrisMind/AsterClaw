@@ -3,12 +3,15 @@
 use crate::memory::MemoryStore;
 use crate::providers::Message;
 use crate::skills::SkillsLoader;
+use once_cell::sync::OnceCell;
 use std::path::PathBuf;
 
 pub struct ContextBuilder {
     workspace: PathBuf,
     skills_loader: SkillsLoader,
     memory: MemoryStore,
+    cached_bootstrap: OnceCell<String>,
+    cached_skills_summary: OnceCell<String>,
 }
 
 impl ContextBuilder {
@@ -19,6 +22,8 @@ impl ContextBuilder {
             workspace,
             skills_loader,
             memory,
+            cached_bootstrap: OnceCell::new(),
+            cached_skills_summary: OnceCell::new(),
         }
     }
 
@@ -73,7 +78,6 @@ impl ContextBuilder {
             env!("CARGO_PKG_VERSION")
         );
 
-        let mut sections = Vec::new();
         let channel_instructions = match channel {
             "telegram" => format!(
                 concat!(
@@ -97,7 +101,7 @@ impl ContextBuilder {
             _ => format!("\n\n## Channel\nYou are responding via the '{}' channel.", channel),
         };
 
-        sections.push(format!(
+        let mut prompt = format!(
             concat!(
                 "# AsterClaw\n\nYou are AsterClaw, a helpful AI assistant.{}\n\n",
                 "## Citation Rules\n",
@@ -119,21 +123,28 @@ impl ContextBuilder {
             self.workspace.display(),
             self.workspace.display(),
             self.workspace.display(),
-        ));
+        );
 
         let tools_section = self.build_tools_section(tool_summaries);
         if !tools_section.is_empty() {
-            sections.push(tools_section);
+            prompt.push_str("\n\n---\n\n");
+            prompt.push_str(&tools_section);
         }
 
-        let bootstrap = self.load_bootstrap_files();
+        let bootstrap = self
+            .cached_bootstrap
+            .get_or_init(|| self.load_bootstrap_files());
         if !bootstrap.is_empty() {
-            sections.push(bootstrap);
+            prompt.push_str("\n\n---\n\n");
+            prompt.push_str(bootstrap);
         }
 
-        let skills_summary = self.skills_loader.build_skills_summary_xml();
+        let skills_summary = self
+            .cached_skills_summary
+            .get_or_init(|| self.skills_loader.build_skills_summary_xml());
         if !skills_summary.is_empty() {
-            sections.push(format!(
+            prompt.push_str("\n\n---\n\n");
+            prompt.push_str(&format!(
                 "# Skills\n\nThe following skills extend your capabilities. To use one, read SKILL.md via read_file.\n\n{}",
                 skills_summary
             ));
@@ -141,21 +152,22 @@ impl ContextBuilder {
 
         let memory_context = self.memory.get_memory_context();
         if !memory_context.is_empty() {
-            sections.push(memory_context);
+            prompt.push_str("\n\n---\n\n");
+            prompt.push_str(&memory_context);
         }
 
-        sections.push(
-            "## Important Rules\n\n1. **ALWAYS use tools** - When you need to perform an action, you MUST call the appropriate tool.\n2. **Be helpful and accurate** - Briefly explain tool actions.\n3. **Memory** - Write persistent facts to memory/MEMORY.md".to_string(),
-        );
+        prompt.push_str("\n\n---\n\n");
+        prompt.push_str("## Important Rules\n\n1. **ALWAYS use tools** - When you need to perform an action, you MUST call the appropriate tool.\n2. **Be helpful and accurate** - Briefly explain tool actions.\n3. **Memory** - Write persistent facts to memory/MEMORY.md");
 
         if !channel.is_empty() && !chat_id.is_empty() {
-            sections.push(format!(
+            prompt.push_str("\n\n---\n\n");
+            prompt.push_str(&format!(
                 "## Current Session\nChannel: {}\nChat ID: {}",
                 channel, chat_id
             ));
         }
 
-        sections.join("\n\n---\n\n")
+        prompt
     }
 
     fn build_tools_section(&self, tool_summaries: &[String]) -> String {

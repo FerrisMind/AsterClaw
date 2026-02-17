@@ -178,6 +178,17 @@ fn main() -> Result<()> {
     }
 }
 
+fn build_runtime(runtime_cfg: &config::RuntimeConfig) -> Result<tokio::runtime::Runtime> {
+    let worker_threads = runtime_cfg.worker_threads.max(1);
+    let max_blocking_threads = runtime_cfg.max_blocking_threads.max(worker_threads);
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(worker_threads)
+        .max_blocking_threads(max_blocking_threads)
+        .enable_all()
+        .build()
+        .map_err(Into::into)
+}
+
 fn onboard() -> Result<()> {
     let config_path = config::get_config_path()?;
 
@@ -250,10 +261,10 @@ fn agent_cmd(message: Option<String>, session: Option<String>) -> Result<()> {
     );
 
     let session_key = session.unwrap_or_else(|| "cli:default".to_string());
+    let runtime = build_runtime(&config.runtime)?;
 
     if let Some(msg) = message {
         // Single message mode
-        let runtime = tokio::runtime::Runtime::new()?;
         let response =
             runtime.block_on(async { agent_loop.process_direct(&msg, &session_key).await })?;
 
@@ -261,16 +272,18 @@ fn agent_cmd(message: Option<String>, session: Option<String>) -> Result<()> {
     } else {
         // Interactive mode
         println!("Interactive mode (Ctrl+C to exit)\n");
-        interactive_mode(&agent_loop, &session_key)?;
+        interactive_mode(&agent_loop, &session_key, &runtime)?;
     }
 
     Ok(())
 }
 
-fn interactive_mode(agent_loop: &Arc<agent::AgentLoop>, session_key: &str) -> Result<()> {
+fn interactive_mode(
+    agent_loop: &Arc<agent::AgentLoop>,
+    session_key: &str,
+    runtime: &tokio::runtime::Runtime,
+) -> Result<()> {
     use std::io::{self, Write};
-
-    let runtime = tokio::runtime::Runtime::new()?;
 
     loop {
         print!("You: ");
@@ -338,7 +351,7 @@ fn gateway_cmd(_debug: bool) -> Result<()> {
         config.gateway.host, config.gateway.port
     );
     println!("Press Ctrl+C to stop");
-    let runtime = tokio::runtime::Runtime::new()?;
+    let runtime = build_runtime(&config.runtime)?;
     runtime.block_on(async move {
         // Start cron runner using the shared service from agent's tool registry
         let cron_service = agent_loop.cron_service();
@@ -657,7 +670,7 @@ fn skills_cmd(command: Option<SkillsCommands>) -> Result<()> {
             }
         }
         Some(SkillsCommands::Install { repo }) => {
-            let rt = tokio::runtime::Runtime::new()?;
+            let rt = build_runtime(&cfg.runtime)?;
             let installed = rt.block_on(async { installer.install_from_github(&repo).await })?;
             println!("Installed skill: {}", installed);
         }
@@ -666,7 +679,7 @@ fn skills_cmd(command: Option<SkillsCommands>) -> Result<()> {
             println!("Removed skill: {}", name);
         }
         Some(SkillsCommands::Search) => {
-            let rt = tokio::runtime::Runtime::new()?;
+            let rt = build_runtime(&cfg.runtime)?;
             let available = rt.block_on(async { installer.list_available_skills().await })?;
             if available.is_empty() {
                 println!("No skills found.");
