@@ -12,7 +12,7 @@
 
 ## 🎬 Демо
 
-https://github.com/FerrisMind/AsterClaw/raw/main/res/demo.mp4
+https://github.com/user-attachments/assets/3fd498ce-77de-4f2d-b100-e807ef06f2e0
 
 ## 📚 Содержание
 
