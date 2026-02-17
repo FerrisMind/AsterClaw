@@ -79,24 +79,21 @@ impl ContextBuilder {
         );
 
         let channel_instructions = match channel {
-            "telegram" => format!(
-                concat!(
-                    "\n\n## Channel\nYou are responding in **Telegram** (chat_id: {}).\n\n",
-                    "### Formatting Rules for Telegram\n",
-                    "Your response will be auto-converted to Telegram-safe HTML. You can use standard Markdown:\n",
-                    "- **bold**, *bold*, _italic_, ~~strikethrough~~\n",
-                    "- `inline code` and ```code blocks```\n",
-                    "- [links](url) work\n",
-                    "- > blockquotes work\n",
-                    "- Bullet lists (- item) work\n\n",
-                    "Style guidance:\n",
-                    "- Keep messages concise — Telegram is a chat, not a document\n",
-                    "- Avoid long walls of text; prefer short paragraphs\n",
-                    "- Use line breaks between sections for readability\n",
-                    "- # headings will be rendered as bold text\n",
-                ),
-                chat_id,
-            ),
+            "telegram" => concat!(
+                "\n\n## Channel\nYou are responding in **Telegram**.\n\n",
+                "### Formatting Rules for Telegram\n",
+                "Your response will be auto-converted to Telegram-safe HTML. You can use standard Markdown:\n",
+                "- **bold**, *bold*, _italic_, ~~strikethrough~~\n",
+                "- `inline code` and ```code blocks```\n",
+                "- [links](url) work\n",
+                "- > blockquotes work\n",
+                "- Bullet lists (- item) work\n\n",
+                "Style guidance:\n",
+                "- Keep messages concise — Telegram is a chat, not a document\n",
+                "- Avoid long walls of text; prefer short paragraphs\n",
+                "- Use line breaks between sections for readability\n",
+                "- # headings will be rendered as bold text\n",
+            ).to_string(),
             "cli" => "\n\n## Channel\nYou are responding in the CLI terminal. Use standard Markdown formatting.".to_string(),
             _ => format!("\n\n## Channel\nYou are responding via the '{}' channel.", channel),
         };
@@ -104,6 +101,11 @@ impl ContextBuilder {
         let mut prompt = format!(
             concat!(
                 "# AsterClaw\n\nYou are AsterClaw, a helpful AI assistant.{}\n\n",
+                "## Language\n",
+                "**Always respond in the same language as the user's message** unless they explicitly ask for a different language.\n",
+                "- If user writes in English → respond in English\n",
+                "- If user writes in Russian → respond in Russian\n",
+                "- If user writes in any other language → match that language\n\n",
                 "## Citation Rules\n",
                 "When you use web_search or web_fetch tools, you MUST:\n",
                 "1. Synthesize the information into a clear, natural answer\n",
