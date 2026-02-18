@@ -56,6 +56,12 @@ jobs:
         with:
           shared-key: ci-${{ matrix.os }}-${{ matrix.target }}
 
+      - name: Install aarch64 cross toolchain (Linux)
+        if: matrix.os == 'ubuntu-latest' && matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
       - name: Tests (native)
         if: ${{ matrix.run_tests }}
         shell: bash

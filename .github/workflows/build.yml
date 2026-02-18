@@ -21,6 +21,8 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: aarch64-linux-android
           - os: windows-latest
             target: x86_64-pc-windows-msvc
           - os: windows-latest
@@ -49,9 +51,34 @@ jobs:
         with:
           shared-key: build-${{ matrix.os }}-${{ matrix.target }}
 
+      - name: Install aarch64 cross toolchain (Linux)
+        if: matrix.os == 'ubuntu-latest' && matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Setup Android SDK/NDK
+        if: matrix.os == 'ubuntu-latest' && matrix.target == 'aarch64-linux-android'
+        uses: android-actions/setup-android@v3
+        with:
+          packages: |
+            platforms;android-34
+            build-tools;34.0.0
+            ndk;26.1.10909125
+
+      - name: Install cargo-ndk
+        if: matrix.os == 'ubuntu-latest' && matrix.target == 'aarch64-linux-android'
+        run: cargo install cargo-ndk --locked
+
       - name: Build
         shell: bash
-        run: cargo build --release --locked --target "$TARGET"
+        run: |
+          if [[ "$TARGET" == "aarch64-linux-android" ]]; then
+            export ANDROID_NDK_ROOT="$ANDROID_SDK_ROOT/ndk/26.1.10909125"
+            cargo ndk -t arm64-v8a build --release --locked
+          else
+            cargo build --release --locked --target "$TARGET"
+          fi
 
       - name: Prepare artifact
         shell: bash
