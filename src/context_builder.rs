@@ -203,7 +203,7 @@ mod tests {
         std::fs::write(ws.join("memory/MEMORY.md"), "remember").expect("write memory");
         std::fs::write(ws.join("AGENTS.md"), "agents cfg").expect("write bootstrap");
         let cb = ContextBuilder::new(ws.clone());
-        let prompt = cb.build_system_prompt("telegram", "123", &["- tool a".to_string()]);
+        let prompt = cb.build_system_prompt("telegram", &["- tool a".to_string()]);
         assert!(prompt.contains("<skills>"));
         assert!(prompt.contains("Long-term Memory"));
         assert!(prompt.contains("Available Tools"));

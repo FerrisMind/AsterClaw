@@ -1,0 +1,109 @@
+name: Build (all platforms)
+
+on:
+  push:
+    branches: ["main"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+
+    env:
+      CARGO_TERM_COLOR: always
+      TARGET: ${{ matrix.target }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.93.0"
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: build-${{ matrix.os }}-${{ matrix.target }}
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+
+      - name: Install cargo-zigbuild
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
+
+      - name: Build
+        shell: bash
+        run: cargo zigbuild --release --locked --target "$TARGET"
+
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import pathlib
+          import shutil
+          import subprocess
+          import sys
+
+          target = os.environ["TARGET"]
+          meta = json.loads(
+              subprocess.check_output(["cargo", "metadata", "--no-deps", "--format-version", "1"])
+          )
+
+          bin_targets = []
+          for pkg in meta.get("packages", []):
+              for t in pkg.get("targets", []):
+                  if "bin" in (t.get("kind") or []):
+                      bin_targets.append(t.get("name"))
+
+          if not bin_targets:
+              print("No binary targets found in cargo metadata.", file=sys.stderr)
+              sys.exit(1)
+
+          bin_name = bin_targets[0]
+          ext = ".exe" if os.name == "nt" else ""
+          src = pathlib.Path("target") / target / "release" / f"{bin_name}{ext}"
+          if not src.exists():
+              print(f"Built binary not found: {src}", file=sys.stderr)
+              sys.exit(1)
+
+          out_dir = pathlib.Path("dist") / target
+          out_dir.mkdir(parents=True, exist_ok=True)
+          shutil.copy2(src, out_dir / src.name)
+          print(f"Prepared: {out_dir / src.name}")
+          PY
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: asterclaw-${{ matrix.target }}
+          path: dist/${{ matrix.target }}/*
+          if-no-files-found: error
+
