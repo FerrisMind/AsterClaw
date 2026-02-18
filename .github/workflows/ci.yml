@@ -65,14 +65,26 @@ jobs:
       - name: Tests (native)
         if: ${{ matrix.run_tests }}
         shell: bash
-        run: cargo test --locked --target "$TARGET"
+        run: |
+          if [[ "$TARGET" == "aarch64-unknown-linux-gnu" ]]; then
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          fi
+          cargo test --locked --target "$TARGET"
 
       - name: Tests (compile-only for cross targets)
         if: ${{ !matrix.run_tests }}
         shell: bash
-        run: cargo test --locked --target "$TARGET" --no-run
+        run: |
+          if [[ "$TARGET" == "aarch64-unknown-linux-gnu" ]]; then
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          fi
+          cargo test --locked --target "$TARGET" --no-run
 
       - name: Clippy
         shell: bash
-        run: cargo clippy --locked --target "$TARGET" -- -D warnings
+        run: |
+          if [[ "$TARGET" == "aarch64-unknown-linux-gnu" ]]; then
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          fi
+          cargo clippy --locked --target "$TARGET" -- -D warnings
 
