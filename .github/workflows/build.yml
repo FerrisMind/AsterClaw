@@ -2,9 +2,7 @@ name: Build (all platforms)
 
 on:
   push:
-    branches: ["main"]
     tags: ["v*"]
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -107,23 +105,29 @@ jobs:
               sys.exit(1)
 
           bin_name = bin_targets[0]
-          ext = ".exe" if os.name == "nt" else ""
+          ext = ".exe" if os.name == "nt" or "windows" in target else ""
           src = pathlib.Path("target") / target / "release" / f"{bin_name}{ext}"
           if not src.exists():
               print(f"Built binary not found: {src}", file=sys.stderr)
               sys.exit(1)
 
-          out_dir = pathlib.Path("dist") / target
+          out_dir = pathlib.Path("dist")
           out_dir.mkdir(parents=True, exist_ok=True)
-          shutil.copy2(src, out_dir / src.name)
-          print(f"Prepared: {out_dir / src.name}")
+
+          archive_basename = out_dir / f"{bin_name}-{target}"
+          if "windows" in target:
+              archive_path = shutil.make_archive(str(archive_basename), "zip", root_dir=src.parent, base_dir=src.name)
+          else:
+              archive_path = shutil.make_archive(str(archive_basename), "gztar", root_dir=src.parent, base_dir=src.name)
+
+          print(f"Prepared archive: {archive_path}")
           PY
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: asterclaw-${{ matrix.target }}
-          path: dist/${{ matrix.target }}/*
+          path: dist/*
           if-no-files-found: error
 
   release:
@@ -144,5 +148,5 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           draft: true
-          files: dist/**/*
+          files: dist/**/*.{zip,tar.gz}
 
