@@ -56,14 +56,6 @@ jobs:
         with:
           shared-key: ci-${{ matrix.os }}-${{ matrix.target }}
 
-      - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
-
-      - name: Install cargo-zigbuild
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-zigbuild
-
       - name: Tests (native)
         if: ${{ matrix.run_tests }}
         shell: bash

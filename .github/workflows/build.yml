@@ -49,17 +49,9 @@ jobs:
         with:
           shared-key: build-${{ matrix.os }}-${{ matrix.target }}
 
-      - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
-
-      - name: Install cargo-zigbuild
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-zigbuild
-
       - name: Build
         shell: bash
-        run: cargo zigbuild --release --locked --target "$TARGET"
+        run: cargo build --release --locked --target "$TARGET"
 
       - name: Prepare artifact
         shell: bash
